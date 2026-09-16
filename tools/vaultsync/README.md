@@ -33,6 +33,18 @@ npm test         # 单元测试（离线，临时 bare remote，不碰真实 Vau
 
 Ctrl+C 正常退出：关闭 watcher、停掉 timer，等在途 git 流程结束后退出。
 
+## 开机自启（Windows）
+
+daemon 没有自动恢复能力：电脑重启或窗口被关后同步即停止，且不会有任何提示。
+本目录已提供自启方案（已配置好则跳过）：
+
+- `start-vaultsync.vbs` 放在「启动」文件夹（`shell:startup`），登录后无窗口启动 daemon；
+  它调用 `start-vaultsync.ps1`（`cmd /c` 追加写日志，保持纯文本编码）。
+  vbs 里的路径是占位符，放入「启动」文件夹前先改成你机器上 ps1 的实际绝对路径。
+- 排查 daemon 是否在跑：`Get-CimInstance Win32_Process -Filter "Name='node.exe'"` 中应有
+  `node src\index.js`；或直接看 `vaultsync.log` 的最后写入时间是否还在更新。
+- 手动重启一次：`wscript start-vaultsync.vbs`（startup sync 会自动补推停机期间的改动）。
+
 ## 配置
 
 `vaultsync.config.json`（也可用 `--config <path>` 或环境变量 `VAULTSYNC_CONFIG` 指定）：
