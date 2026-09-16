@@ -4,11 +4,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -31,11 +34,11 @@ import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
+import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
-import com.obsidiancompanion.feature.home.DividerList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -120,24 +123,14 @@ fun FilesScreen(
             )
         }
 
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = AppSpacing.screenBottomPadding),
-        ) {
-            when {
-                !viewModel.hasIndex -> EmptyState(
-                    illustration = R.drawable.spot_empty,
-                    title = "还没有仓库索引",
-                    subtitle = "完成引导或联网刷新一次，即可离线浏览全部目录",
-                )
-                entries.isEmpty() -> EmptyState(
-                    illustration = R.drawable.spot_empty,
-                    title = "这个文件夹是空的",
-                    subtitle = "在电脑端往这里放点东西，刷新后就能看到",
-                )
-                else -> DividerList(entries) { entry ->
+        // 列表走 LazyColumn（大文件夹只组合可见行）；空态保持原滚动容器
+        if (viewModel.hasIndex && entries.isNotEmpty()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = AppSpacing.screenBottomPadding),
+            ) {
+                itemsIndexed(entries, key = { _, entry -> entry.path }) { index, entry ->
+                    if (index > 0) AppHorizontalDivider()
                     when (entry.kind) {
                         EntryKind.DIRECTORY -> FolderRow(
                             entry = entry,
@@ -148,6 +141,27 @@ fun FilesScreen(
                         EntryKind.IMAGE -> AttachmentRow(entry = entry, onClick = { onOpenImage(entry.path) })
                         else -> AttachmentRow(entry = entry, onClick = onAttachmentTap)
                     }
+                }
+            }
+        } else {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = AppSpacing.screenBottomPadding),
+            ) {
+                if (!viewModel.hasIndex) {
+                    EmptyState(
+                        illustration = R.drawable.spot_empty,
+                        title = "还没有仓库索引",
+                        subtitle = "完成引导或联网刷新一次，即可离线浏览全部目录",
+                    )
+                } else {
+                    EmptyState(
+                        illustration = R.drawable.spot_empty,
+                        title = "这个文件夹是空的",
+                        subtitle = "在电脑端往这里放点东西，刷新后就能看到",
+                    )
                 }
             }
         }
