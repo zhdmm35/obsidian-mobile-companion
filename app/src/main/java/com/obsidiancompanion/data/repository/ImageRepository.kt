@@ -17,8 +17,8 @@ import kotlinx.coroutines.withContext
  * 不建完整 attachments mirror；认证与缓存策略由数据层控制，Coil 只负责解码展示。
  */
 sealed interface ImageResult {
-    /** 字节就绪（含来源标记，用于「离线缓存」提示逻辑）。 */
-    data class Ready(val bytes: ByteArray, val fromCache: Boolean) : ImageResult
+    /** 字节就绪（含来源标记，用于「离线缓存」提示逻辑）。path = 解析后的仓库相对路径（查看器/同目录滑动用）。 */
+    data class Ready(val bytes: ByteArray, val fromCache: Boolean, val path: String) : ImageResult
 
     /** Tree 中没有该目标（§29 Missing）——不是“文件不存在于磁盘”，是 Vault 里就没有。 */
     data object Missing : ImageResult
@@ -59,8 +59,18 @@ class ImageRepository(
         return loadImage(url.removePrefix("./"), currentPath)
     }
 
+    /**
+     * 按精确仓库路径加载（图片查看器：Files 页点开 / Reader 图片放大）。
+     * 与 loadImage 共用同一 fetchBytes 管线；Tree 里没有该路径 → Missing。
+     */
+    suspend fun loadByPath(path: String): ImageResult {
+        val repoId = settings.flow.firstOrNull()?.repoId ?: return ImageResult.Missing
+        val entry = resolver.findEntry(repoId, path) ?: return ImageResult.Missing
+        return fetchBytes(ImageResolution.Found(entry.path, entry.blobSha, entry.size))
+    }
+
     private suspend fun fetchBytes(found: ImageResolution.Found): ImageResult = withContext(Dispatchers.IO) {
-        cache.get(found.blobSha)?.let { return@withContext ImageResult.Ready(it, fromCache = true) }
+        cache.get(found.blobSha)?.let { return@withContext ImageResult.Ready(it, fromCache = true, path = found.path) }
         if (!network.isOnline) return@withContext ImageResult.OfflineNotCached
         val s = settings.flow.firstOrNull()
         val owner = s?.owner ?: return@withContext ImageResult.Missing
@@ -68,7 +78,7 @@ class ImageRepository(
         when (val r = remote.getRawFile(owner, repo, found.path)) {
             is GitHubResult.Ok -> {
                 cache.put(found.blobSha, r.value)
-                ImageResult.Ready(r.value, fromCache = false)
+                ImageResult.Ready(r.value, fromCache = false, path = found.path)
             }
             is GitHubResult.NotModified -> ImageResult.Missing // raw 内容端点不会 304；防御分支
             is GitHubResult.Fail -> when (r.error) {

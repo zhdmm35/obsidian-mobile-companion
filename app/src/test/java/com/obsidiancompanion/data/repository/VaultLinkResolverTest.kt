@@ -186,4 +186,24 @@ class VaultLinkResolverTest {
         val r = resolver(*tree).resolveRelativeImagePath("o/r", "https://example.com/a.png", null)
         assertEquals(ImageResolution.NotFound, r)
     }
+
+    /* ── findEntry（图片查看器按精确路径定位）───────────────── */
+
+    @Test
+    fun `findEntry exact path hit`() = runTest {
+        val r = resolver(*tree).findEntry("o/r", "assets/logo.png")
+        assertEquals("assets/logo.png", r?.path)
+        assertEquals(EntryKind.IMAGE, r?.kind)
+    }
+
+    @Test
+    fun `findEntry miss returns null`() = runTest {
+        assertEquals(null, resolver(*tree).findEntry("o/r", "assets/none.png"))
+    }
+
+    @Test
+    fun `findEntry is case sensitive`() = runTest {
+        // Tree path 是规范形式：查看器持有精确路径，不做大小写兜底
+        assertEquals(null, resolver(*tree).findEntry("o/r", "Assets/logo.png"))
+    }
 }

@@ -23,6 +23,9 @@ object Routes {
     const val READER = "reader/{noteId}?anchor={anchor}"
     const val EDITOR = "editor/{noteId}"
 
+    /** 图片查看器（path = URL 编码的仓库相对路径，与 Reader 同一约定）。 */
+    const val VIEWER = "viewer/{path}"
+
     /** Phase 5 §16：真实冲突页（noteId = URL 编码的仓库相对路径）。 */
     const val CONFLICT = "conflict/{noteId}"
 
@@ -34,6 +37,8 @@ object Routes {
         if (anchor == null) "reader/$noteId" else "reader/$noteId?anchor=$anchor"
 
     fun editor(noteId: String): String = "editor/$noteId"
+
+    fun viewer(path: String): String = "viewer/$path"
 
     fun conflict(noteId: String): String = "conflict/$noteId"
 

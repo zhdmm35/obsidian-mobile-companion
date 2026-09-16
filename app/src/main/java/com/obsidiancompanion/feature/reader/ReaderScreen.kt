@@ -57,6 +57,7 @@ fun ReaderScreen(
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onOpenNote: (path: String, heading: String?) -> Unit,
+    onOpenImage: (String) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: ReaderViewModel = viewModel(),
@@ -117,6 +118,7 @@ fun ReaderScreen(
             onBack = onBack,
             onEdit = onEdit,
             onOpenNote = onOpenNote,
+            onOpenImage = onOpenImage,
             onOpenExternalUrl = onOpenExternalUrl,
             onShowSnackbar = onShowSnackbar,
             viewModel = viewModel,
@@ -148,6 +150,7 @@ private fun ReaderContent(
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onOpenNote: (path: String, heading: String?) -> Unit,
+    onOpenImage: (String) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: ReaderViewModel,
@@ -303,6 +306,7 @@ private fun ReaderContent(
                     links = links,
                     currentNotePath = state.path,
                     deadLinks = deadLinks,
+                    onOpenImage = onOpenImage,
                     modifier = Modifier.padding(horizontal = AppSpacing.readerPaddingHorizontal),
                 )
             }

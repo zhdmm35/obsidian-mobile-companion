@@ -81,6 +81,7 @@ fun ReaderBlockRenderer(
     currentNotePath: String,
     modifier: Modifier = Modifier,
     deadLinks: Set<String> = emptySet(),
+    onOpenImage: (String) -> Unit = {},
 ) {
     when (block) {
         is MdBlock.Heading -> ReaderHeading(block, links, deadLinks, modifier)
@@ -96,6 +97,7 @@ fun ReaderBlockRenderer(
             links = links,
             currentNotePath = currentNotePath,
             deadLinks = deadLinks,
+            onOpenImage = onOpenImage,
             modifier = modifier,
         )
         is MdBlock.OrderedList -> ReaderList(
@@ -104,15 +106,16 @@ fun ReaderBlockRenderer(
             links = links,
             currentNotePath = currentNotePath,
             deadLinks = deadLinks,
+            onOpenImage = onOpenImage,
             modifier = modifier,
         )
-        is MdBlock.TaskList -> ReaderTaskList(block, links, currentNotePath, deadLinks, modifier)
-        is MdBlock.Quote -> ReaderQuote(block, links, currentNotePath, deadLinks, modifier)
-        is MdBlock.Callout -> ReaderCallout(block, links, currentNotePath, deadLinks, modifier)
+        is MdBlock.TaskList -> ReaderTaskList(block, links, currentNotePath, deadLinks, onOpenImage, modifier)
+        is MdBlock.Quote -> ReaderQuote(block, links, currentNotePath, deadLinks, onOpenImage, modifier)
+        is MdBlock.Callout -> ReaderCallout(block, links, currentNotePath, deadLinks, onOpenImage, modifier)
         is MdBlock.CodeBlock -> ReaderCodeBlock(block, modifier)
         is MdBlock.Table -> ReaderTable(block, links, deadLinks, modifier)
-        is MdBlock.Image -> ReaderNativeImage(block, currentNotePath, modifier)
-        is MdBlock.ImageEmbed -> ReaderImageEmbed(block, currentNotePath, modifier)
+        is MdBlock.Image -> ReaderNativeImage(block, currentNotePath, onOpenImage, modifier)
+        is MdBlock.ImageEmbed -> ReaderImageEmbed(block, currentNotePath, onOpenImage, modifier)
         is MdBlock.EmbeddedNote -> ReaderEmbeddedNoteCard(block, currentNotePath, links, modifier)
         is MdBlock.EmbeddedFile -> ReaderEmbeddedFileCard(block, modifier)
         MdBlock.HorizontalRule -> ReaderHorizontalRule(modifier)
@@ -154,6 +157,7 @@ private fun ReaderList(
     links: ReaderLinkHandler,
     currentNotePath: String,
     deadLinks: Set<String>,
+    onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -181,6 +185,7 @@ private fun ReaderList(
                             links = links,
                             currentNotePath = currentNotePath,
                             deadLinks = deadLinks,
+                            onOpenImage = onOpenImage,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -197,6 +202,7 @@ private fun ReaderTaskList(
     links: ReaderLinkHandler,
     currentNotePath: String,
     deadLinks: Set<String>,
+    onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -234,6 +240,7 @@ private fun ReaderTaskList(
                             links = links,
                             currentNotePath = currentNotePath,
                             deadLinks = deadLinks,
+                            onOpenImage = onOpenImage,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -250,6 +257,7 @@ private fun ReaderQuote(
     links: ReaderLinkHandler,
     currentNotePath: String,
     deadLinks: Set<String>,
+    onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -270,7 +278,7 @@ private fun ReaderQuote(
                 .padding(start = 14.dp, top = 4.dp, bottom = 4.dp),
         ) {
             block.children.forEach { child ->
-                ReaderBlockRenderer(child, links, currentNotePath, deadLinks = deadLinks)
+                ReaderBlockRenderer(child, links, currentNotePath, deadLinks = deadLinks, onOpenImage = onOpenImage)
             }
         }
     }
@@ -294,6 +302,7 @@ private fun ReaderCallout(
     links: ReaderLinkHandler,
     currentNotePath: String,
     deadLinks: Set<String>,
+    onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val skin = calloutSkin(block.kind)
@@ -329,6 +338,7 @@ private fun ReaderCallout(
                         links = links,
                         currentNotePath = currentNotePath,
                         deadLinks = deadLinks,
+                        onOpenImage = onOpenImage,
                         modifier = Modifier,
                     )
                 }
@@ -451,11 +461,12 @@ private fun estimateColumnWidths(block: MdBlock.Table): List<Dp> {
 
 /* ── 图片（§25-§31）───────────────────────────────────────── */
 
-/** Obsidian 图片嵌入 ![[a.png|650]]：Tree 解析 → SHA 缓存 → Coil 渲染。 */
+/** Obsidian 图片嵌入 ![[a.png|650]]：Tree 解析 → SHA 缓存 → Coil 渲染；点击进查看器看大图。 */
 @Composable
 fun ReaderImageEmbed(
     block: MdBlock.ImageEmbed,
     currentNotePath: String,
+    onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val result by produceState<ImageResult?>(initialValue = null, block.target, currentNotePath) {
@@ -465,6 +476,7 @@ fun ReaderImageEmbed(
         state = result,
         fileName = block.target.substringAfterLast('/'),
         widthPx = block.widthPx,
+        onOpenImage = onOpenImage,
         modifier = modifier,
     )
 }
@@ -474,6 +486,7 @@ fun ReaderImageEmbed(
 fun ReaderNativeImage(
     block: MdBlock.Image,
     currentNotePath: String,
+    onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isExternal = block.url.startsWith("http://") || block.url.startsWith("https://")
@@ -486,6 +499,7 @@ fun ReaderNativeImage(
         widthPx = null,
         alt = block.alt,
         externalUrl = if (isExternal) block.url else null,
+        onOpenImage = onOpenImage,
         modifier = modifier,
     )
 }
@@ -498,6 +512,7 @@ private fun ReaderImageSlot(
     widthPx: Int?,
     alt: String? = null,
     externalUrl: String? = null,
+    onOpenImage: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxWidth().padding(vertical = 12.dp)) {
@@ -515,14 +530,14 @@ private fun ReaderImageSlot(
             state is ImageResult.Ready -> {
                 val targetWidth: Dp? = widthPx?.let { px -> px.dp.coerceAtMost(maxWidth) }
                 AsyncImage(
-                    model = (state as ImageResult.Ready).bytes,
+                    model = state.bytes,
                     contentDescription = alt ?: fileName,
                     contentScale = ContentScale.Fit,
-                    modifier = if (targetWidth != null) {
+                    modifier = (if (targetWidth != null) {
                         Modifier.width(targetWidth)
                     } else {
                         Modifier.fillMaxWidth()
-                    },
+                    }).clickable { onOpenImage(state.path) },
                     onError = { decodeFailed = true },
                 )
             }

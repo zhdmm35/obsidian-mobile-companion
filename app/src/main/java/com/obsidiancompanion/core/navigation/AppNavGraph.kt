@@ -47,6 +47,7 @@ import com.obsidiancompanion.feature.search.SearchScreen
 import com.obsidiancompanion.feature.settings.SettingsScreen
 import com.obsidiancompanion.feature.sync.ConflictScreen
 import com.obsidiancompanion.feature.sync.SyncScreen
+import com.obsidiancompanion.feature.viewer.ImageViewerScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLDecoder
@@ -76,6 +77,11 @@ fun AppNavGraph() {
     fun openNote(path: String, anchor: String? = null) {
         val encoded = URLEncoder.encode(path, "UTF-8")
         navController.navigate(Routes.reader(encoded, anchor?.let { URLEncoder.encode(it, "UTF-8") }))
+    }
+
+    /** 图片查看器：与 Reader 同一 URL 编码约定 */
+    fun openViewer(path: String) {
+        navController.navigate(Routes.viewer(URLEncoder.encode(path, "UTF-8")))
     }
 
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -195,6 +201,7 @@ fun AppNavGraph() {
             composable(Routes.FILES) {
                 FilesScreen(
                     onOpenNote = { openNote(it) },
+                    onOpenImage = { openViewer(it) },
                     onAttachmentTap = { showSnackbar("V1 仅支持阅读 Markdown 笔记") },
                 )
             }
@@ -224,6 +231,15 @@ fun AppNavGraph() {
 
             // ── Push 栈 ──────────────────────────────────────────────
             composable(
+                route = Routes.VIEWER,
+                arguments = listOf(navArgument("path") { type = NavType.StringType }),
+            ) { entry ->
+                ImageViewerScreen(
+                    initialPath = URLDecoder.decode(entry.arguments?.getString("path").orEmpty(), "UTF-8"),
+                    onBack = { navController.popBackStack() },
+                )
+            }
+            composable(
                 route = Routes.READER,
                 arguments = listOf(
                     navArgument("noteId") { type = NavType.StringType },
@@ -244,6 +260,7 @@ fun AppNavGraph() {
                     onOpenNote = { path, heading ->
                         openNote(path, heading)
                     },
+                    onOpenImage = { openViewer(it) },
                     onOpenExternalUrl = { url ->
                         try {
                             context.startActivity(

@@ -18,6 +18,8 @@ An independent Android companion app for Markdown vaults stored in GitHub reposi
   使用 fine-grained 个人访问令牌连接任意 GitHub 仓库；浏览文件与文件夹、按笔记名搜索、收藏与最近打开。
 - Render Markdown tables, task lists, Obsidian WikiLinks, callouts, frontmatter, and embedded images/notes (unsupported syntax degrades gracefully to plain text).
   渲染 Markdown 表格、任务列表、Obsidian WikiLink、Callout、Frontmatter 以及图片/笔记嵌入（暂不支持的语法会降级为原文显示，不会报错）。
+- View vault images full-screen: tap an image in the file browser or inside a note, pinch or double-tap to zoom, and swipe to browse other images in the same folder. Works offline for cached images.
+  图片全屏查看：在文件浏览页或笔记中点击图片打开，支持双指/双击缩放与拖动，左右滑动浏览同目录图片；已缓存图片离线可看。
 - Read previously cached notes offline; uncached content requires a network connection.
   已缓存的笔记可离线阅读；未缓存内容需要联网。
 - Edit existing Markdown notes and save them to GitHub. If the remote note changed while you were editing, the app shows both versions and lets you review before resolving the conflict — no silent overwrite.

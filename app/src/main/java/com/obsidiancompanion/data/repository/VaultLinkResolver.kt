@@ -161,6 +161,10 @@ class VaultLinkResolver(
 
     /* ── 共用 ──────────────────────────────────────────────── */
 
+    /** 按精确仓库路径取条目（图片查看器等已持有完整 path 的调用方；Tree path 是规范形式，精确匹配）。 */
+    suspend fun findEntry(repoId: String, path: String): RepoEntryEntity? =
+        allEntries(repoId).firstOrNull { it.path == path }
+
     private fun normalize(raw: String): String = raw.trim().removePrefix("/").removePrefix("./").trim()
 
     /** 文件名匹配：先精确，再大小写不敏感；省略 .md 时补齐（§13）。 */

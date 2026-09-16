@@ -85,6 +85,7 @@ class FilesViewModel : ViewModel() {
 @Composable
 fun FilesScreen(
     onOpenNote: (String) -> Unit,
+    onOpenImage: (String) -> Unit,
     onAttachmentTap: () -> Unit,
     viewModel: FilesViewModel = viewModel(),
 ) {
@@ -143,6 +144,7 @@ fun FilesScreen(
                             onClick = { viewModel.openFolder(entry.path) },
                         )
                         EntryKind.MARKDOWN -> FileRow(entry = entry, onClick = { onOpenNote(entry.path) })
+                        EntryKind.IMAGE -> AttachmentRow(entry = entry, onClick = { onOpenImage(entry.path) })
                         else -> AttachmentRow(entry = entry, onClick = onAttachmentTap)
                     }
                 }
