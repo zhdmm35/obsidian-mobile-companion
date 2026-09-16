@@ -1,0 +1,16 @@
+{
+  "name": "vaultsync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PC Obsidian Vault <-> GitHub auto sync (debounced commit+push, periodic fetch+rebase+pull)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "sync": "node src/index.js --once",
+    "test": "node --test test/vaultsync.test.js"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3"
+  }
+}

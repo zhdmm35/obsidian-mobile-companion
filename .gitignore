@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+.kotlin/
+*.log
+
+# vaultsync (Phase 6A)
+tools/vaultsync/node_modules/
+/tools/vaultsync/vaultsync.config.json
+/tools/vaultsync/vaultsync.log

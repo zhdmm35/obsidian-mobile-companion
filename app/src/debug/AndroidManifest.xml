@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug 独有：允许 cleartext，仅用于本机 mock GitHub 服务器（10.0.2.2）做 E2E 验证；release 不允许 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true" />
+</manifest>
