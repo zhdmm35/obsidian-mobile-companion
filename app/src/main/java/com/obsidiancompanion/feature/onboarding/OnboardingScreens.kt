@@ -1,5 +1,6 @@
 package com.obsidiancompanion.feature.onboarding
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -23,11 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppTypography
@@ -176,20 +180,16 @@ fun OnboardingWelcomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
-        Box(
+        // 品牌主视觉（artwork/hero-welcome.jpg 同款）：书 ↔ 手机同步插画，圆角卡片呈现
+        Image(
+            painter = painterResource(R.drawable.hero_welcome),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
             modifier = Modifier
-                .size(76.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(AppColors.accent),
-            contentAlignment = Alignment.Center,
-        ) {
-            androidx.compose.material3.Icon(
-                com.obsidiancompanion.core.design.AppIcons.Book,
-                contentDescription = null,
-                tint = AppColors.onAccent,
-                modifier = Modifier.size(24.dp),
-            )
-        }
+                .size(190.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .border(1.dp, AppColors.borderStrong, RoundedCornerShape(28.dp)),
+        )
         Spacer(Modifier.height(24.dp))
         Text("欢迎", style = AppTypography.displayLarge)
         Spacer(Modifier.height(10.dp))
