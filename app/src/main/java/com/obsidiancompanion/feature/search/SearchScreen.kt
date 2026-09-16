@@ -39,6 +39,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -247,7 +248,7 @@ fun SearchScreen(
                 }
                 results.isEmpty() -> {
                     EmptyState(
-                        icon = AppIcons.Search,
+                        illustration = R.drawable.spot_search,
                         title = "没有找到「${viewModel.query.trim()}」相关的笔记",
                         subtitle = "试试更短的关键词，或检查文件名",
                     )

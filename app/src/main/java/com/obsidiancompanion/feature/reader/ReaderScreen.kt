@@ -29,6 +29,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -89,7 +90,7 @@ fun ReaderScreen(
             ReaderTopBar(onBack = onBack, onMore = null)
             Spacer(Modifier.weight(1f))
             EmptyState(
-                icon = AppIcons.CloudOff,
+                illustration = R.drawable.spot_offline,
                 title = "当前离线",
                 subtitle = "这篇笔记还没有缓存到手机。\n联网后即可打开。",
             )

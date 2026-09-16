@@ -26,6 +26,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppSpacing
@@ -127,12 +128,12 @@ fun FilesScreen(
         ) {
             when {
                 !viewModel.hasIndex -> EmptyState(
-                    icon = AppIcons.Folder,
+                    illustration = R.drawable.spot_empty,
                     title = "还没有仓库索引",
                     subtitle = "完成引导或联网刷新一次，即可离线浏览全部目录",
                 )
                 entries.isEmpty() -> EmptyState(
-                    icon = AppIcons.Folder,
+                    illustration = R.drawable.spot_empty,
                     title = "这个文件夹是空的",
                     subtitle = "在电脑端往这里放点东西，刷新后就能看到",
                 )

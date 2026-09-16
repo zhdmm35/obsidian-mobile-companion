@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,11 +35,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -405,39 +409,48 @@ fun OnboardingDoneScreen(
         viewModelStoreOwner = androidx.compose.ui.platform.LocalContext.current as androidx.lifecycle.ViewModelStoreOwner,
     )
     val markdownCount = downloadViewModel.markdownCount
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 30.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.weight(1f))
-        Box(
+    Box(Modifier.fillMaxSize()) {
+        // 与欢迎页同款的极淡纸纹背景，首尾呼应
+        Image(
+            painter = painterResource(R.drawable.bg_welcome),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Column(
             modifier = Modifier
-                .size(64.dp)
-                .clip(CircleShape)
-                .background(AppColors.surface)
-                .border(1.dp, AppColors.border, CircleShape),
-            contentAlignment = Alignment.Center,
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(AppIcons.Check, contentDescription = null, tint = AppColors.textPrimary, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+                    .background(AppColors.surface)
+                    .border(1.dp, AppColors.border, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(AppIcons.Check, contentDescription = null, tint = AppColors.textPrimary, modifier = Modifier.size(24.dp))
+            }
+            Spacer(Modifier.height(20.dp))
+            Text(
+                if (markdownCount > 0) "${markdownCount} 篇笔记已准备好" else "Vault 已连接",
+                style = AppTypography.displayLarge,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "文件列表已缓存到手机。正文会在你打开时加载，读过就离线可看。",
+                style = AppTypography.bodyBase,
+                color = AppColors.textTertiary,
+            )
+            Spacer(Modifier.height(28.dp))
+            PrimaryButton(text = "开始阅读", onClick = onFinished, block = true)
+            Spacer(Modifier.height(28.dp))
+            DotsIndicator(count = 5, current = 4)
+            Spacer(Modifier.weight(1f))
         }
-        Spacer(Modifier.height(20.dp))
-        Text(
-            if (markdownCount > 0) "${markdownCount} 篇笔记已准备好" else "Vault 已连接",
-            style = AppTypography.displayLarge,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "文件列表已缓存到手机。正文会在你打开时加载，读过就离线可看。",
-            style = AppTypography.bodyBase,
-            color = AppColors.textTertiary,
-        )
-        Spacer(Modifier.height(28.dp))
-        PrimaryButton(text = "开始阅读", onClick = onFinished, block = true)
-        Spacer(Modifier.height(28.dp))
-        DotsIndicator(count = 5, current = 4)
-        Spacer(Modifier.weight(1f))
     }
 }

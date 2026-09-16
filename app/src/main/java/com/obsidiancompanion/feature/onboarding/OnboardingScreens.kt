@@ -167,43 +167,51 @@ private fun DomainError.tokenMessage(): String = when (this) {
     else -> "无法连接 GitHub，请稍后再试"
 }
 
-/** Onboarding 1/6 —— 欢迎（文案按在线优先语义更新） */
+/** Onboarding 1/6 —— 欢迎（文案按在线优先语义更新）；极淡的品牌纸纹背景（artwork/bg-welcome.jpg） */
 @Composable
 fun OnboardingWelcomeScreen(
     onStart: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 30.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Spacer(Modifier.weight(1f))
-        // 品牌主视觉（artwork/hero-welcome.jpg 同款）：书 ↔ 手机同步插画，圆角卡片呈现
+    Box(Modifier.fillMaxSize()) {
         Image(
-            painter = painterResource(R.drawable.hero_welcome),
+            painter = painterResource(R.drawable.bg_welcome),
             contentDescription = null,
             contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Column(
             modifier = Modifier
-                .size(190.dp)
-                .clip(RoundedCornerShape(28.dp))
-                .border(1.dp, AppColors.borderStrong, RoundedCornerShape(28.dp)),
-        )
-        Spacer(Modifier.height(24.dp))
-        Text("欢迎", style = AppTypography.displayLarge)
-        Spacer(Modifier.height(10.dp))
-        Text(
-            "在手机上阅读你的 Obsidian Vault。\n笔记保存在 GitHub 仓库里，打开过的内容会缓存到手机，没有网络也能翻阅。",
-            style = AppTypography.bodyBase,
-            color = AppColors.textTertiary,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-        Spacer(Modifier.height(28.dp))
-        PrimaryButton(text = "连接 GitHub", onClick = onStart, block = true)
-        Spacer(Modifier.height(28.dp))
-        DotsIndicator(count = 5, current = 0)
-        Spacer(Modifier.weight(1f))
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.weight(1f))
+            // 品牌主视觉（artwork/hero-welcome.jpg 同款）：书 ↔ 手机同步插画，圆角卡片呈现
+            Image(
+                painter = painterResource(R.drawable.hero_welcome),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(190.dp)
+                    .clip(RoundedCornerShape(28.dp))
+                    .border(1.dp, AppColors.borderStrong, RoundedCornerShape(28.dp)),
+            )
+            Spacer(Modifier.height(24.dp))
+            Text("欢迎", style = AppTypography.displayLarge)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "在手机上阅读你的 Obsidian Vault。\n笔记保存在 GitHub 仓库里，打开过的内容会缓存到手机，没有网络也能翻阅。",
+                style = AppTypography.bodyBase,
+                color = AppColors.textTertiary,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            Spacer(Modifier.height(28.dp))
+            PrimaryButton(text = "连接 GitHub", onClick = onStart, block = true)
+            Spacer(Modifier.height(28.dp))
+            DotsIndicator(count = 5, current = 0)
+            Spacer(Modifier.weight(1f))
+        }
     }
 }
 
