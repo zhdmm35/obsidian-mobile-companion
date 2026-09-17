@@ -6,12 +6,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,12 +50,12 @@ import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.AppChip
+import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SectionHeader
 import com.obsidiancompanion.core.ui.fadeUp
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
-import com.obsidiancompanion.feature.home.DividerList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -217,45 +220,55 @@ fun SearchScreen(
             }
         }
 
-        Column(
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = AppSpacing.screenBottomPadding),
-        ) {
-            when {
-                viewModel.isIdle -> {
-                    if (viewModel.recentQueries.isNotEmpty()) {
-                        SectionHeader("最近搜索")
-                        Row(
-                            modifier = Modifier.padding(
-                                start = AppSpacing.screenPaddingHorizontal,
-                                end = AppSpacing.screenPaddingHorizontal,
-                                top = 6.dp,
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                        ) {
-                            viewModel.recentQueries.take(6).forEach { recent ->
-                                AppChip(text = recent, onClick = { viewModel.applyRecent(recent) })
-                            }
+        when {
+            viewModel.isIdle -> Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = AppSpacing.screenBottomPadding),
+            ) {
+                if (viewModel.recentQueries.isNotEmpty()) {
+                    SectionHeader("最近搜索")
+                    Row(
+                        modifier = Modifier.padding(
+                            start = AppSpacing.screenPaddingHorizontal,
+                            end = AppSpacing.screenPaddingHorizontal,
+                            top = 6.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+                    ) {
+                        viewModel.recentQueries.take(6).forEach { recent ->
+                            AppChip(text = recent, onClick = { viewModel.applyRecent(recent) })
                         }
                     }
-                    EmptyState(
-                        icon = AppIcons.Search,
-                        title = "按文件名搜索",
-                        subtitle = if (viewModel.hasIndex) "输入关键词，实时过滤 Vault 中的全部笔记" else "还没有仓库索引，联网刷新一次后即可搜索",
-                    )
                 }
-                results.isEmpty() -> {
-                    EmptyState(
-                        illustration = R.drawable.spot_search,
-                        title = "没有找到「${viewModel.query.trim()}」相关的笔记",
-                        subtitle = "试试更短的关键词，或检查文件名",
-                    )
-                }
-                else -> {
-                    SectionHeader("搜索结果 · ${results.size}")
-                    DividerList(results) { entry ->
+                EmptyState(
+                    icon = AppIcons.Search,
+                    title = "按文件名搜索",
+                    subtitle = if (viewModel.hasIndex) "输入关键词，实时过滤 Vault 中的全部笔记" else "还没有仓库索引，联网刷新一次后即可搜索",
+                )
+            }
+            results.isEmpty() -> Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = AppSpacing.screenBottomPadding),
+            ) {
+                EmptyState(
+                    illustration = R.drawable.spot_search,
+                    title = "没有找到「${viewModel.query.trim()}」相关的笔记",
+                    subtitle = "试试更短的关键词，或检查文件名",
+                )
+            }
+            else -> {
+                // 结果数量不设上限，走 LazyColumn（只组合可见行；与文件列表同一形态）
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = AppSpacing.screenBottomPadding),
+                ) {
+                    item { SectionHeader("搜索结果 · ${results.size}") }
+                    itemsIndexed(results, key = { _, entry -> entry.path }) { index, entry ->
+                        if (index > 0) AppHorizontalDivider()
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

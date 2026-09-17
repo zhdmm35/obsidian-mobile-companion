@@ -32,6 +32,10 @@ interface RepoEntryDao {
     @Query("DELETE FROM repo_entries WHERE repoId = :repoId")
     suspend fun deleteByRepo(repoId: String)
 
+    /** 增量刷新用：按 path 批量删除（调用方负责分片，避免超出 SQLite 变量上限）。 */
+    @Query("DELETE FROM repo_entries WHERE repoId = :repoId AND path IN (:paths)")
+    suspend fun deleteByPaths(repoId: String, paths: List<String>)
+
     /**
      * Phase 5 §10/§50：保存成功后立即把 entry 指向新 blob（不必等整树 refresh），
      * observedChangedAt = now → Home 最近修改立即出现（不等下一次远程 Tree refresh）。

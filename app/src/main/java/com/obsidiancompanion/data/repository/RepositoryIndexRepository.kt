@@ -52,6 +52,11 @@ class RepositoryIndexRepository(
     private val _refreshUiState = MutableStateFlow(RefreshUiState())
     val refreshUiState: StateFlow<RefreshUiState> = _refreshUiState.asStateFlow()
 
+    private companion object {
+        /** SQLite 单语句变量上限保险值（老设备 999），批量删除按此分片。 */
+        const val DELETE_CHUNK = 500
+    }
+
     /**
      * 唯一刷新入口（§20）。Phase 6B：force=false（自动触发）受 freshness window 去重 ——
      * 刚成功刷新过就静默跳过（不发 HTTP、不动 UI 状态）；force=true（手动刷新）始终直接请求。
@@ -91,8 +96,13 @@ class RepositoryIndexRepository(
                     val old = db.repoEntryDao().getAll(repoId)
                     val diff = TreeDiff.compute(repoId, old, r.value, now)
                     db.withTransaction {
-                        db.repoEntryDao().deleteByRepo(repoId)
-                        db.repoEntryDao().insertAll(diff.entries)
+                        // 增量入库：只写 Added/Changed/Deleted 行 —— 不再整表 delete+insert；
+                        // 无变化的刷新对 repo_entries 零写入，Room 观察流不再被无意义重放
+                        val upserts = diff.upsertEntries()
+                        if (upserts.isNotEmpty()) db.repoEntryDao().insertAll(upserts)
+                        diff.deletedPaths.chunked(DELETE_CHUNK).forEach { chunk ->
+                            db.repoEntryDao().deleteByPaths(repoId, chunk)
+                        }
                         db.repositoryStateDao().upsert(
                             RepositoryStateEntity(
                                 repoId = repoId,

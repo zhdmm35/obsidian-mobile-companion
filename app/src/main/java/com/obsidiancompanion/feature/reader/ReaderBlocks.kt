@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.detectTapGestures
-import coil.compose.AsyncImage
+import androidx.compose.ui.graphics.asImageBitmap
 import com.obsidiancompanion.AppGraph
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
@@ -461,7 +461,34 @@ private fun estimateColumnWidths(block: MdBlock.Table): List<Dp> {
 
 /* ── 图片（§25-§31）───────────────────────────────────────── */
 
-/** Obsidian 图片嵌入 ![[a.png|650]]：Tree 解析 → SHA 缓存 → Coil 渲染；点击进查看器看大图。 */
+/**
+ * Reader 内嵌图 UI 态：字节在加载协程内完成降采样解码后，UI 只持有 Bitmap ——
+ * 原始 ByteArray 立即可回收（多图笔记不再每张都常驻全尺寸字节）。
+ */
+private sealed interface ReaderImageUi {
+    data object Loading : ReaderImageUi
+    data class Ready(val bitmap: androidx.compose.ui.graphics.ImageBitmap, val path: String) : ReaderImageUi
+    data object DecodeFailed : ReaderImageUi
+    data object Missing : ReaderImageUi
+    data object OfflineNotCached : ReaderImageUi
+    data object Ambiguous : ReaderImageUi
+    data object Error : ReaderImageUi
+}
+
+private suspend fun ImageResult.toReaderImageUi(): ReaderImageUi = when (this) {
+    is ImageResult.Ready -> {
+        val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.obsidiancompanion.util.decodeDownsampled(bytes, com.obsidiancompanion.util.READER_IMAGE_MAX_DIM)
+        }
+        if (bitmap != null) ReaderImageUi.Ready(bitmap.asImageBitmap(), path) else ReaderImageUi.DecodeFailed
+    }
+    ImageResult.Missing -> ReaderImageUi.Missing
+    ImageResult.OfflineNotCached -> ReaderImageUi.OfflineNotCached
+    ImageResult.Ambiguous -> ReaderImageUi.Ambiguous
+    is ImageResult.Error -> ReaderImageUi.Error
+}
+
+/** Obsidian 图片嵌入 ![[a.png|650]]：Tree 解析 → SHA 缓存 → 降采样解码渲染；点击进查看器看大图。 */
 @Composable
 fun ReaderImageEmbed(
     block: MdBlock.ImageEmbed,
@@ -469,11 +496,11 @@ fun ReaderImageEmbed(
     onOpenImage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val result by produceState<ImageResult?>(initialValue = null, block.target, currentNotePath) {
-        value = AppGraph.imageRepository.loadImage(block.target, currentNotePath)
+    val state by produceState<ReaderImageUi>(ReaderImageUi.Loading, block.target, currentNotePath) {
+        value = AppGraph.imageRepository.loadImage(block.target, currentNotePath).toReaderImageUi()
     }
     ReaderImageSlot(
-        state = result,
+        state = state,
         fileName = block.target.substringAfterLast('/'),
         widthPx = block.widthPx,
         onOpenImage = onOpenImage,
@@ -490,11 +517,15 @@ fun ReaderNativeImage(
     modifier: Modifier = Modifier,
 ) {
     val isExternal = block.url.startsWith("http://") || block.url.startsWith("https://")
-    val result by produceState<ImageResult?>(initialValue = null, block.url, currentNotePath) {
-        value = if (isExternal) null else AppGraph.imageRepository.loadNativeImage(block.url, currentNotePath)
+    val state by produceState<ReaderImageUi>(ReaderImageUi.Loading, block.url, currentNotePath) {
+        value = if (isExternal) {
+            ReaderImageUi.Missing
+        } else {
+            AppGraph.imageRepository.loadNativeImage(block.url, currentNotePath).toReaderImageUi()
+        }
     }
     ReaderImageSlot(
-        state = result,
+        state = state,
         fileName = block.url.substringAfterLast('/'),
         widthPx = null,
         alt = block.alt,
@@ -504,10 +535,10 @@ fun ReaderNativeImage(
     )
 }
 
-/** 图片槽位四态 + 加载中（§29/§56）。Obsidian `|650` 尺寸后缀按 px 上限约束（§30）；解码失败可见回退。 */
+/** 图片槽位状态 + 加载中（§29/§56）。Obsidian `|650` 尺寸后缀按 px 上限约束（§30）；解码失败可见回退。 */
 @Composable
 private fun ReaderImageSlot(
-    state: ImageResult?,
+    state: ReaderImageUi,
     fileName: String,
     widthPx: Int?,
     alt: String? = null,
@@ -517,20 +548,15 @@ private fun ReaderImageSlot(
 ) {
     BoxWithConstraints(modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         val maxWidth = this.maxWidth
-        var decodeFailed by remember(state) { mutableStateOf(false) }
         Column(
             Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            when {
-            state is ImageResult.Ready && decodeFailed -> ImagePlaceholderCard(
-                fileName = fileName,
-                caption = "图片无法显示",
-            )
-            state is ImageResult.Ready -> {
+            when (state) {
+            is ReaderImageUi.Ready -> {
                 val targetWidth: Dp? = widthPx?.let { px -> px.dp.coerceAtMost(maxWidth) }
-                AsyncImage(
-                    model = state.bytes,
+                androidx.compose.foundation.Image(
+                    bitmap = state.bitmap,
                     contentDescription = alt ?: fileName,
                     contentScale = ContentScale.Fit,
                     modifier = (if (targetWidth != null) {
@@ -538,26 +564,29 @@ private fun ReaderImageSlot(
                     } else {
                         Modifier.fillMaxWidth()
                     }).clickable { onOpenImage(state.path) },
-                    onError = { decodeFailed = true },
                 )
             }
-            state == null -> ImagePlaceholderCard(
+            ReaderImageUi.Loading -> ImagePlaceholderCard(
                 fileName = fileName,
                 caption = if (externalUrl != null) "外部图片 · V1 不加载" else null,
             )
-            state is ImageResult.Missing -> ImagePlaceholderCard(
+            ReaderImageUi.DecodeFailed -> ImagePlaceholderCard(
+                fileName = fileName,
+                caption = "图片无法显示",
+            )
+            ReaderImageUi.Missing -> ImagePlaceholderCard(
                 fileName = fileName,
                 caption = externalUrl?.let { "外部图片 · V1 不加载" } ?: "Vault 中没有这个附件",
             )
-            state is ImageResult.OfflineNotCached -> ImagePlaceholderCard(
+            ReaderImageUi.OfflineNotCached -> ImagePlaceholderCard(
                 fileName = fileName,
                 caption = "图片尚未缓存\n联网后可显示",
             )
-            state is ImageResult.Ambiguous -> ImagePlaceholderCard(
+            ReaderImageUi.Ambiguous -> ImagePlaceholderCard(
                 fileName = fileName,
                 caption = "同名附件有多份，暂无法确定",
             )
-            state is ImageResult.Error -> ImagePlaceholderCard(
+            ReaderImageUi.Error -> ImagePlaceholderCard(
                 fileName = fileName,
                 caption = "图片加载失败",
             )

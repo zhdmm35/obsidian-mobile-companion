@@ -140,9 +140,8 @@ class SyncViewModel : ViewModel() {
 
     fun refreshCacheStats() {
         viewModelScope.launch {
-            val size = AppGraph.contentCache.size()
-            val count = AppGraph.contentCache.count()
-            cacheStats.value = count to Format.bytes(size)
+            val stat = AppGraph.contentCache.stat()
+            cacheStats.value = stat.count to Format.bytes(stat.bytes)
         }
     }
 

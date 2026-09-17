@@ -25,16 +25,15 @@ class VaultLinkResolverTest {
         )
     }
 
-    private fun resolver(vararg paths: String): VaultLinkResolver {
-        val entries = paths.map { p ->
-            entry(p, kind = when (p.substringAfterLast('.', "").lowercase()) {
-                "png", "jpg", "jpeg", "webp", "gif" -> EntryKind.IMAGE
-                "md" -> EntryKind.MARKDOWN
-                else -> EntryKind.OTHER
-            })
-        }
-        return VaultLinkResolver { entries }
+    private fun entriesOf(vararg paths: String): List<RepoEntryEntity> = paths.map { p ->
+        entry(p, kind = when (p.substringAfterLast('.', "").lowercase()) {
+            "png", "jpg", "jpeg", "webp", "gif" -> EntryKind.IMAGE
+            "md" -> EntryKind.MARKDOWN
+            else -> EntryKind.OTHER
+        })
     }
+
+    private fun resolver(vararg paths: String): VaultLinkResolver = VaultLinkResolver { entriesOf(*paths) }
 
     private val tree = arrayOf(
         "Java/Spring Boot.md",
@@ -205,5 +204,33 @@ class VaultLinkResolverTest {
     fun `findEntry is case sensitive`() = runTest {
         // Tree path 是规范形式：查看器持有精确路径，不做大小写兜底
         assertEquals(null, resolver(*tree).findEntry("o/r", "Assets/logo.png"))
+    }
+
+    /* ── 快照版 API（调用方持有一份 entries 批量解析，语义与 suspend 版一致）────────── */
+
+    @Test
+    fun `snapshot resolveNote resolves unique basename`() {
+        val r = resolver(*tree).resolveNote(entriesOf(*tree), "Claude Code", null, null)
+        assertEquals("AI/Claude Code.md", (r as LinkResolution.Note).path)
+    }
+
+    @Test
+    fun `snapshot resolveNote prefers same directory and reports global ambiguity`() {
+        val entries = entriesOf(*tree)
+        val sameDir = resolver(*tree).resolveNote(entries, "Spring Boot", null, "Java/x.md")
+        assertEquals("Java/Spring Boot.md", (sameDir as LinkResolution.Note).path)
+        assertTrue(resolver(*tree).resolveNote(entries, "Spring Boot", null, null) is LinkResolution.Ambiguous)
+    }
+
+    @Test
+    fun `snapshot resolveImage resolves same directory first`() {
+        val r = resolver(*tree).resolveImage(entriesOf(*tree), "logo.png", "assets/a.md")
+        assertEquals("assets/logo.png", (r as ImageResolution.Found).path)
+    }
+
+    @Test
+    fun `snapshot resolveNote empty target is same-note anchor`() {
+        val r = resolver(*tree).resolveNote(entriesOf(*tree), "", "标题", "docs/index.md")
+        assertEquals(LinkResolution.SameNote("标题"), r)
     }
 }

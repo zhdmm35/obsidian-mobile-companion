@@ -136,4 +136,43 @@ class TreeDiffTest {
         assertEquals(77L, r.entries.first { it.path == "Java" }.observedChangedAt)
         assertEquals(5L, r.entries.first { it.path == "Java/A.md" }.observedChangedAt)
     }
+
+    /* ── upsertEntries（增量入库行集）────────────────────── */
+
+    @Test
+    fun `upsertEntries firstLoad returns all entries`() {
+        val remote = RemoteTree(
+            rootSha = "root",
+            entries = listOf(blob("A.md", "a"), blob("B.md", "b")),
+            etag = null,
+        )
+        val r = TreeDiff.compute("o/r", emptyList(), remote, 999L)
+        assertTrue(r.firstLoad)
+        assertEquals(r.entries, r.upsertEntries())
+    }
+
+    @Test
+    fun `upsertEntries returns only added and changed in remote order`() {
+        val oldEntries = listOf(old(path = "A.md", sha = "sha1"), old(path = "B.md", sha = "sha2"))
+        val remote = RemoteTree(
+            rootSha = "root",
+            entries = listOf(blob("A.md", "sha3"), blob("B.md", "sha2"), blob("C.md", "sha4")),
+            etag = null,
+        )
+        val r = TreeDiff.compute("o/r", oldEntries, remote, 999L)
+        assertEquals(listOf("A.md", "C.md"), r.upsertEntries().map { it.path })
+    }
+
+    @Test
+    fun `upsertEntries empty when nothing added or changed`() {
+        val oldEntries = listOf(old(path = "A.md", sha = "sha1"), old(path = "B.md", sha = "sha2"))
+        val remote = RemoteTree(
+            rootSha = "root",
+            entries = listOf(blob("A.md", "sha1")), // B.md 删除，A.md 不变
+            etag = null,
+        )
+        val r = TreeDiff.compute("o/r", oldEntries, remote, 999L)
+        assertEquals(listOf("B.md"), r.deletedPaths)
+        assertEquals(emptyList<RepoEntryEntity>(), r.upsertEntries())
+    }
 }

@@ -43,10 +43,18 @@ class VaultLinkResolver(
 
     /* ── 笔记链接 ───────────────────────────────────────────── */
 
-    suspend fun resolveNote(repoId: String, rawTarget: String, heading: String?, currentPath: String?): LinkResolution {
+    suspend fun resolveNote(repoId: String, rawTarget: String, heading: String?, currentPath: String?): LinkResolution =
+        resolveNote(allEntries(repoId), rawTarget, heading, currentPath)
+
+    /**
+     * 基于调用方持有的一份 Tree 快照解析（语义与 suspend 版完全一致）。
+     * 批量场景（如 Reader 渲染前解析整篇笔记的链接）由调用方取一次快照循环复用，
+     * 避免每条链接一次 Room 全表查询。
+     */
+    fun resolveNote(entries: List<RepoEntryEntity>, rawTarget: String, heading: String?, currentPath: String?): LinkResolution {
         val target = normalize(rawTarget)
         if (target.isEmpty()) return LinkResolution.SameNote(heading)
-        val notes = allEntries(repoId).filter { it.kind == EntryKind.MARKDOWN }
+        val notes = entries.filter { it.kind == EntryKind.MARKDOWN }
         val currentDir = currentPath?.substringBeforeLast('/', missingDelimiterValue = "")
 
         // 显式 path 形式（§13）：[[Java/Spring Boot]]
@@ -102,9 +110,13 @@ class VaultLinkResolver(
 
     /* ── 图片附件（§26）────────────────────────────────────── */
 
-    suspend fun resolveImage(repoId: String, rawTarget: String, currentPath: String?): ImageResolution {
+    suspend fun resolveImage(repoId: String, rawTarget: String, currentPath: String?): ImageResolution =
+        resolveImage(allEntries(repoId), rawTarget, currentPath)
+
+    /** 快照版图片解析（同 resolveNote 的批量考量）。 */
+    fun resolveImage(entries: List<RepoEntryEntity>, rawTarget: String, currentPath: String?): ImageResolution {
         val target = normalize(rawTarget)
-        val images = allEntries(repoId).filter { it.kind == EntryKind.IMAGE }
+        val images = entries.filter { it.kind == EntryKind.IMAGE }
         val currentDir = currentPath?.substringBeforeLast('/', missingDelimiterValue = "")
 
         if (target.contains('/')) {

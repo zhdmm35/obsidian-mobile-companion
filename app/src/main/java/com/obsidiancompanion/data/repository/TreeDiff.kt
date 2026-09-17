@@ -19,6 +19,17 @@ object TreeDiff {
         val firstLoad: Boolean,
     ) {
         val hasChanges: Boolean get() = addedPaths.isNotEmpty() || changedPaths.isNotEmpty() || deletedPaths.isNotEmpty()
+
+        /**
+         * 增量入库需要 upsert 的行：firstLoad 时全部（此时 addedPaths 按定义为空），
+         * 否则只有 Added + Changed（Unchanged 行各字段均由 path+sha+旧 observedChangedAt 派生，与库中一致，可跳过）。
+         */
+        fun upsertEntries(): List<RepoEntryEntity> {
+            if (firstLoad) return entries
+            if (addedPaths.isEmpty() && changedPaths.isEmpty()) return emptyList()
+            val upsertPaths = (addedPaths + changedPaths).toSet()
+            return entries.filter { it.path in upsertPaths }
+        }
     }
 
     fun compute(

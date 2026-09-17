@@ -53,13 +53,25 @@ class ContentCache(baseDir: File) {
         }
     }
 
-    /** 缓存总字节数。 */
-    suspend fun size(): Long = withContext(Dispatchers.IO) {
-        dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    /** 缓存统计（bytes = 全部文件总字节；count = 正式条目数，排除 .tmp）。 */
+    data class Stat(val bytes: Long, val count: Int)
+
+    /** 单次目录遍历同时得到总字节与条目数（SyncScreen 两处展示共用，不再各走一遍）。 */
+    suspend fun stat(): Stat = withContext(Dispatchers.IO) {
+        var bytes = 0L
+        var count = 0
+        dir.walkTopDown().forEach { f ->
+            if (f.isFile) {
+                bytes += f.length()
+                if (!f.name.endsWith(".tmp")) count++
+            }
+        }
+        Stat(bytes, count)
     }
 
+    /** 缓存总字节数。 */
+    suspend fun size(): Long = stat().bytes
+
     /** 缓存条目数（SyncScreen「缓存笔记」）。 */
-    suspend fun count(): Int = withContext(Dispatchers.IO) {
-        dir.walkTopDown().filter { it.isFile && !it.name.endsWith(".tmp") }.count()
-    }
+    suspend fun count(): Int = stat().count
 }

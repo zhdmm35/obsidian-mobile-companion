@@ -32,7 +32,6 @@ sealed interface ReaderUiState {
         val sizeLabel: String,
         val blobSha: String,
         val changedLabel: String?,
-        val isFavorite: Boolean,
     ) : ReaderUiState
 
     /** 从未缓存 + 离线（§5 专用提示文案）。 */
@@ -50,9 +49,17 @@ class ReaderViewModel : ViewModel() {
     var state by mutableStateOf<ReaderUiState>(ReaderUiState.Loading)
         private set
 
+    /**
+     * 收藏态独立于 Content（整文档 state）：切换收藏只翻转这个 Boolean，
+     * 不再 copy 含整篇 AST 的 Content 触发正文重组；静默重取正文时也天然保留。
+     */
+    var isFavorite by mutableStateOf(false)
+        private set
+
     private var loadedPath: String? = null
     private var lastSha: String? = null
     private var observingPath: String? = null
+    private var favoriteJob: kotlinx.coroutines.Job? = null
 
     /** 由 Screen 在进入 / 路径变化时调用。 */
     fun load(path: String) {
@@ -86,7 +93,6 @@ class ReaderViewModel : ViewModel() {
                         sizeLabel = Format.bytes(r.entry.size),
                         blobSha = r.entry.blobSha,
                         changedLabel = Format.relativeTime(r.entry.observedChangedAt),
-                        isFavorite = (state as? ReaderUiState.Content)?.isFavorite ?: false,
                     )
                     observeFavorite(path)
                 }
@@ -114,20 +120,21 @@ class ReaderViewModel : ViewModel() {
         }
     }
 
+    /** 每次成功加载只保留一个观察协程（旧路径/上次 fetch 的取消掉，避免累积与跨笔记串写）。 */
     private fun observeFavorite(path: String) {
-        viewModelScope.launch {
+        favoriteJob?.cancel()
+        favoriteJob = viewModelScope.launch {
             val repoId = AppGraph.settings.flow.firstOrNull()?.repoId ?: return@launch
             AppGraph.database.noteMetadataDao().observeOne(repoId, path).collect { meta ->
-                val content = state as? ReaderUiState.Content ?: return@collect
-                state = content.copy(isFavorite = meta?.isFavorite == true)
+                isFavorite = meta?.isFavorite == true
             }
         }
     }
 
     fun toggleFavorite(): Boolean {
         val content = state as? ReaderUiState.Content ?: return false
-        val next = !content.isFavorite
-        state = content.copy(isFavorite = next)
+        val next = !isFavorite
+        isFavorite = next
         viewModelScope.launch { AppGraph.noteRepository.setFavorite(content.path, next) }
         return next
     }

@@ -58,11 +58,20 @@ class FilesViewModel : ViewModel() {
     var tree by mutableStateOf<List<RepoEntryEntity>>(emptyList())
         private set
 
+    /**
+     * 按父路径分组的预排序索引：tree 每次更新重建一次（O(tree)），
+     * entries()/childCount() 退化为 O(1) 查表 —— 不再每行、每次重组都全表 filter/count。
+     */
+    private var childrenByParent by mutableStateOf<Map<String?, List<RepoEntryEntity>>>(emptyMap())
+
     init {
         viewModelScope.launch {
             AppGraph.settings.flow.flatMapLatest { s ->
                 s.repoId?.let { AppGraph.indexRepository.observeTree(it) } ?: flowOf(emptyList())
-            }.collect { tree = it }
+            }.collect {
+                tree = it
+                childrenByParent = indexByParent(it)
+            }
         }
     }
 
@@ -70,20 +79,22 @@ class FilesViewModel : ViewModel() {
 
     val currentPath: String get() = pathSegments.joinToString("/")
 
-    fun entries(): List<RepoEntryEntity> {
-        val parent = currentPath.ifEmpty { null }
-        return tree
-            .filter { it.parentPath == parent }
-            .sortedWith(compareBy({ it.kind != EntryKind.DIRECTORY }, { it.name }))
-    }
+    fun entries(): List<RepoEntryEntity> = childrenByParent[currentPath.ifEmpty { null }].orEmpty()
 
-    fun childCount(dir: RepoEntryEntity): Int = tree.count { it.parentPath == dir.path }
+    fun childCount(dir: RepoEntryEntity): Int = childrenByParent[dir.path]?.size ?: 0
 
     fun openFolder(fullPath: String) { pathSegments = fullPath.split("/") }
     fun pop() { pathSegments = pathSegments.dropLast(1) }
     fun navigateTo(index: Int) { pathSegments = if (index < 0) emptyList() else pathSegments.take(index + 1) }
     fun reset() { pathSegments = emptyList() }
 }
+
+/** 目录浏览索引：按 parentPath 分组并预排序（文件夹在前 + 名称字典序），一次构建全目录复用。纯函数，可单测。 */
+internal fun indexByParent(tree: List<RepoEntryEntity>): Map<String?, List<RepoEntryEntity>> =
+    tree.groupBy { it.parentPath }
+        .mapValues { (_, children) ->
+            children.sortedWith(compareBy({ it.kind != EntryKind.DIRECTORY }, { it.name }))
+        }
 
 /** 文件浏览页（原型 renderFiles）：返回 + 面包屑 + 文件夹/文件/附件行 + 空文件夹态 */
 @Composable

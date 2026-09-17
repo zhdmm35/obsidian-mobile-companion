@@ -200,9 +200,11 @@ private fun ReaderContent(
             }
         }
         visitBlocks(state.document.blocks)
+        // 整篇笔记只取一次 Tree 快照，逐链接内存解析（不再每条链接一次 Room 全表查询）
+        val entries = AppGraph.database.repoEntryDao().getAll(repoId)
         val dead = mutableSetOf<String>()
         for (wiki in wikis) {
-            when (AppGraph.linkResolver.resolveNote(repoId, wiki.target, wiki.heading, state.path)) {
+            when (AppGraph.linkResolver.resolveNote(entries, wiki.target, wiki.heading, state.path)) {
                 LinkResolution.NotFound, is LinkResolution.Ambiguous -> dead += wiki.raw
                 else -> Unit
             }
@@ -319,7 +321,7 @@ private fun ReaderContent(
     if (moreSheetVisible) {
         ReaderMoreSheet(
             noteTitle = state.title,
-            isFavorite = state.isFavorite,
+            isFavorite = viewModel.isFavorite,
             onDismiss = { moreSheetVisible = false },
             onEdit = {
                 moreSheetVisible = false
