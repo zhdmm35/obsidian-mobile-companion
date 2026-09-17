@@ -113,7 +113,6 @@ class NoteRepository(
     }
 
     /* ── Phase 5：Editing + GitHub Write（§2-§18）────────────────────── */
-
     /** 冲突页取远端最新版（§16）：domain 化返回，ViewModel 不接触 GitHubResult。 */
     sealed interface RemoteNoteVersion {
         data class Ready(val sha: String, val content: String) : RemoteNoteVersion
@@ -152,6 +151,49 @@ class NoteRepository(
             stageDraft(ctx.repoId, path, baseSha, content)
 
             putAndConverge(ctx, path, content, baseSha)
+        }
+
+    /**
+     * 新建 Markdown 笔记（新建对话框 / 分享快速收集）：PUT 不带 sha 的「仅创建」。
+     * Tree 已有该路径 → 直接 Conflict（不发请求）；远端 422（竞态已存在）同样归一为 Conflict ——
+     * 创建场景的 Conflict 只表示「同名已存在」，由调用方提示换名，绝不进编辑冲突流程。
+     * 成功后本地立即收敛：正文写 ContentCache + Tree 插入新 entry（Reader/Editor 即刻可开），
+     * 整树由调用方异步 refreshTree 补齐（如新目录的 DIRECTORY 行）。
+     */
+    suspend fun createNote(path: String, content: String): NoteSaveResult =
+        withContext(Dispatchers.Default) {
+            val ctx = writeContext() ?: return@withContext NoteSaveResult.Error(DomainError.Unknown)
+            if (index.getEntry(ctx.repoId, path) != null) {
+                return@withContext NoteSaveResult.Conflict(path)
+            }
+
+            val bytes = content.toByteArray(Charsets.UTF_8)
+            val message = "mobile: create ${path.substringAfterLast('/')}"
+            when (val r = remote.createFile(ctx.owner, ctx.repo, path, bytes, message, ctx.branch)) {
+                is GitHubResult.Ok -> {
+                    cache.put(r.value.newSha, bytes)
+                    db.repoEntryDao().insertAll(
+                        listOf(
+                            RepoEntryEntity(
+                                repoId = ctx.repoId,
+                                path = path,
+                                name = path.substringAfterLast('/'),
+                                parentPath = path.substringBeforeLast('/', missingDelimiterValue = "").takeIf { it.isNotEmpty() },
+                                kind = EntryKind.MARKDOWN,
+                                blobSha = r.value.newSha,
+                                size = bytes.size.toLong(),
+                                observedChangedAt = System.currentTimeMillis(),
+                            ),
+                        ),
+                    )
+                    NoteSaveResult.Saved(path, r.value.newSha, r.value.commitSha)
+                }
+                is GitHubResult.Fail -> when (r.error) {
+                    DomainError.Conflict -> NoteSaveResult.Conflict(path)
+                    else -> NoteSaveResult.Error(r.error)
+                }
+                is GitHubResult.NotModified -> NoteSaveResult.Error(DomainError.Unknown) // PUT 不会 304；防御分支
+            }
         }
 
     /** §18「使用我的修改」：重新获取最新 remote SHA（§45 Use Mine）→ 再用我的正文 PUT —— 用户明确确认的覆盖。 */

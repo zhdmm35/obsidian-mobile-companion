@@ -90,6 +90,14 @@ data class UpdateFileRequestDto(
     val branch: String,
 )
 
+/** PUT contents 创建请求体：与更新的唯一区别是不带 sha —— GitHub 据此执行「仅创建」，已存在时 422。 */
+@Serializable
+data class CreateFileRequestDto(
+    val message: String,
+    val content: String,
+    val branch: String,
+)
+
 @Serializable
 data class ContentItemDto(
     val name: String? = null,

@@ -161,6 +161,39 @@ class GitHubRemoteDataSource(
         }
     }
 
+    /**
+     * Contents create：PUT 不带 sha → 仅创建新文件（新建笔记 / 快速收集）。
+     * 路径已存在时 GitHub 返回 422 —— 映射为 DomainError.Conflict（「已存在」语义，
+     * 与编辑的 409「被改过了」同属「不能静默继续」，由调用方各自解释）。
+     */
+    suspend fun createFile(
+        owner: String,
+        repo: String,
+        path: String,
+        content: ByteArray,
+        message: String,
+        branch: String,
+    ): GitHubResult<UpdatedFile> = withContext(Dispatchers.IO) {
+        runGuarded {
+            val request = CreateFileRequestDto(
+                message = message,
+                content = java.util.Base64.getEncoder().encodeToString(content),
+                branch = branch,
+            )
+            val resp = api.createContent(contentsUrl(owner, repo, path), request)
+            val body = resp.body()
+            when {
+                resp.isSuccessful && body != null -> {
+                    val newSha = body.content?.sha
+                        ?: return@runGuarded GitHubResult.Fail(DomainError.MalformedResponse)
+                    GitHubResult.Ok(UpdatedFile(newSha = newSha, commitSha = body.commit?.sha))
+                }
+                resp.code() == 422 -> GitHubResult.Fail(DomainError.Conflict, resp.code())
+                else -> resp.toFail()
+            }
+        }
+    }
+
     /** repos/{o}/{r}/contents/{path…}：路径按段编码（空格→%20，CJK→UTF-8 百分号，'/' 保留为分隔符）。 */
     private fun contentsUrl(owner: String, repo: String, path: String): okhttp3.HttpUrl =
         baseUrl.newBuilder()

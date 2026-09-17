@@ -70,4 +70,6 @@ object AppIcons {
     val Wifi by lazy { strokeIcon("wifi", "M5 9.5A10 10 0 0 1 19 9.5", "M8 12.5A6 6 0 0 1 16 12.5", "M11 15.5A1 1 0 1 0 13 15.5A1 1 0 1 0 11 15.5") }
     val Cell by lazy { strokeIcon("cell", "M4 19V9M9 19V5M14 19V10M19 19V13") }
     val Battery by lazy { strokeIcon("batt", "M5 8H17A2 2 0 0 1 19 10V14A2 2 0 0 1 17 16H5A2 2 0 0 1 3 14V10A2 2 0 0 1 5 8Z", "M21.5 11V13") }
+    val Add by lazy { strokeIcon("add", "M12 5.5V18.5M5.5 12H18.5") }
+    val Eye by lazy { strokeIcon("eye", "M2.5 12C4.5 7.6 8 5.5 12 5.5C16 5.5 19.5 7.6 21.5 12C19.5 16.4 16 18.5 12 18.5C8 18.5 4.5 16.4 2.5 12Z", "M9.7 12A2.3 2.3 0 1 0 14.3 12A2.3 2.3 0 1 0 9.7 12") }
 }

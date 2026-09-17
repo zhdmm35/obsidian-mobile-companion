@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -410,13 +411,17 @@ fun OnboardingDoneScreen(
     )
     val markdownCount = downloadViewModel.markdownCount
     Box(Modifier.fillMaxSize()) {
-        // 与欢迎页同款的极淡纸纹背景，首尾呼应
-        Image(
-            painter = painterResource(R.drawable.bg_welcome),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
+        // 与欢迎页同款的极淡纸纹背景，首尾呼应；深色主题下换 palette 底色保对比
+        if (isSystemInDarkTheme()) {
+            Box(Modifier.fillMaxSize().background(AppColors.background))
+        } else {
+            Image(
+                painter = painterResource(R.drawable.bg_welcome),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()

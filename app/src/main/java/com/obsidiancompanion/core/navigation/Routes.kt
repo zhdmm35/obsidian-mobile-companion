@@ -33,6 +33,9 @@ object Routes {
     const val CONFLICT_DEMO = "conflict"
     const val SYNC = "sync"
 
+    /** 快速收集（系统分享文本 → 新笔记；文本经 AppGraph.pendingSharedText 传递，不走 URL）。 */
+    const val QUICK_CAPTURE = "capture"
+
     fun reader(noteId: String, anchor: String? = null): String =
         if (anchor == null) "reader/$noteId" else "reader/$noteId?anchor=$anchor"
 

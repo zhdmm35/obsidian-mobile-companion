@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,15 +45,23 @@ import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
+import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.core.ui.GhostButton
 import com.obsidiancompanion.core.ui.PrimaryButton
 import com.obsidiancompanion.core.ui.SecondaryButton
+import com.obsidiancompanion.data.markdown.MarkdownParser
 import com.obsidiancompanion.data.metadata.entities.PendingEditEntity
 import com.obsidiancompanion.data.repository.NoteOpenResult
 import com.obsidiancompanion.data.repository.NoteSaveResult
+import com.obsidiancompanion.feature.reader.ReaderBlockRenderer
+import com.obsidiancompanion.feature.reader.ReaderLinkHandler
 import com.obsidiancompanion.model.DomainError
+import com.obsidiancompanion.model.markdown.MdDocument
+import com.obsidiancompanion.model.markdown.MdInline
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 编辑器（Phase 5 正式态）：真实 Markdown source + 保存写回 GitHub。
@@ -89,6 +98,9 @@ class EditorViewModel : ViewModel() {
     /** 加载完成前输入框禁用 —— 防止用户在 load 完成前打字被加载结果覆盖。 */
     var loaded by mutableStateOf(false)
         private set
+
+    /** 预览模式：只读渲染当前文本（复用 Reader 渲染管线），不与输入框同时显示。 */
+    var preview by mutableStateOf(false)
 
     fun load(path: String) {
         if (loadedPath == path) return
@@ -297,6 +309,16 @@ fun EditorScreen(
                 small = true,
             )
             Spacer(Modifier.weight(1f))
+            // 预览切换（仅加载完成后可用；激活时 accent 着色）
+            if (viewModel.loaded) {
+                AppIconButton(
+                    icon = AppIcons.Eye,
+                    contentDescription = if (viewModel.preview) "返回编辑" else "预览",
+                    onClick = { if (!saving) viewModel.preview = !viewModel.preview },
+                    tint = if (viewModel.preview) AppColors.accent else AppColors.textPrimary,
+                    iconSize = 19.dp,
+                )
+            }
             PrimaryButton(
                 text = if (saving) "保存中…" else "保存", // §14：Saving 简单 loading
                 onClick = {
@@ -311,8 +333,8 @@ fun EditorScreen(
             )
         }
 
-        // 快捷输入条（原型 .edtb）；未加载完成 / 保存中不可用（与输入框同一把锁）
-        val toolsEnabled = viewModel.loaded && !saving
+        // 快捷输入条（原型 .edtb）；未加载完成 / 保存中 / 预览中不可用（与输入框同一把锁）
+        val toolsEnabled = viewModel.loaded && !saving && !viewModel.preview
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -338,6 +360,11 @@ fun EditorScreen(
         ) {
             val hint = viewModel.loadHint
             when {
+                // 预览：只读渲染当前文本（预览中文本不可变，每次进入只解析一次）
+                viewModel.preview && viewModel.loaded -> EditorPreview(
+                    markdown = viewModel.value.text,
+                    notePath = notePath,
+                )
                 // 保存中禁用输入：保存的是发起时的快照，飞行中新敲的字不会进 PUT 也不会进 draft
                 viewModel.loaded -> BasicTextField(
                     value = viewModel.value,
@@ -410,5 +437,39 @@ private fun EditorToolIcon(
             tint = if (enabled) AppColors.textSecondary else AppColors.textTertiary,
             modifier = Modifier.size(16.dp),
         )
+    }
+}
+
+/**
+ * 编辑预览：当前文本的一次性只读渲染（复用 Reader 渲染管线）。
+ * 预览中文本不可变 → produceState 每次进入只解析一次；链接/图片点击在预览中惰性（不跳转）。
+ * 外层容器已是 verticalScroll（与源文本同一滚动区），故用普通 Column 而非 LazyColumn。
+ */
+@Composable
+private fun EditorPreview(markdown: String, notePath: String) {
+    val document by produceState<MdDocument?>(null, markdown) {
+        value = withContext(Dispatchers.Default) { MarkdownParser.parse(markdown) }
+    }
+    val links = remember {
+        object : ReaderLinkHandler {
+            override fun onExternalLink(url: String) = Unit
+            override fun onWikiLink(wiki: MdInline.WikiLink) = Unit
+        }
+    }
+    val doc = document
+    if (doc == null) {
+        Text("正在生成预览…", style = AppTypography.bodySmall, color = AppColors.textTertiary)
+        return
+    }
+    Column(Modifier.fillMaxWidth()) {
+        doc.blocks.forEach { block ->
+            ReaderBlockRenderer(
+                block = block,
+                links = links,
+                currentNotePath = notePath,
+                deadLinks = emptySet(),
+                onOpenImage = {},
+            )
+        }
     }
 }

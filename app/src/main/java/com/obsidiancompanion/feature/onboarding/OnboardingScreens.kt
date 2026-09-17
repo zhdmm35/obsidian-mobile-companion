@@ -2,6 +2,7 @@ package com.obsidiancompanion.feature.onboarding
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -173,12 +174,17 @@ fun OnboardingWelcomeScreen(
     onStart: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        Image(
-            painter = painterResource(R.drawable.bg_welcome),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
+        // 纸纹是浅色图：深色主题下换 palette 底色，保证文字对比
+        if (isSystemInDarkTheme()) {
+            Box(Modifier.fillMaxSize().background(AppColors.background))
+        } else {
+            Image(
+                painter = painterResource(R.drawable.bg_welcome),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()

@@ -308,4 +308,46 @@ class NoteRepositoryWriteTest {
         assertTrue(one!!.isFavorite)
         assertEquals(111L, one.lastReadAt)
     }
+
+    /* ── createNote（新建 / 快速收集：仅创建，绝不覆盖）────────── */
+
+    @Test
+    fun createNote_success_insertsEntryCachesContent() = runTest {
+        server.enqueue(json200("newsha1", "c1000"))
+        val r = repository.createNote("Inbox/快速收集.md", "hello 分享 🎉")
+        assertTrue(r is NoteSaveResult.Saved)
+        assertEquals("newsha1", (r as NoteSaveResult.Saved).newSha)
+
+        // PUT body 不带 sha（仅创建语义）
+        val req = server.takeRequest()
+        assertEquals("PUT", req.method)
+        assertEquals("/repos/o/r/contents/Inbox/%E5%BF%AB%E9%80%9F%E6%94%B6%E9%9B%86.md", req.path)
+        val body = json.parseToJsonElement(req.body.readUtf8()).jsonObject
+        assertTrue("sha" !in body)
+
+        // 本地收敛：Tree 插入新 entry + 正文按 newSha 写缓存 → openNote 立即可读（无需整树刷新）
+        val e = db.repoEntryDao().get("o/r", "Inbox/快速收集.md")!!
+        assertEquals(EntryKind.MARKDOWN, e.kind)
+        assertEquals("Inbox", e.parentPath)
+        assertEquals("newsha1", e.blobSha)
+        assertNotNull(e.observedChangedAt)
+        val opened = repository.openNote("Inbox/快速收集.md")
+        assertTrue(opened is NoteOpenResult.Content)
+        assertEquals("hello 分享 🎉", (opened as NoteOpenResult.Content).markdown)
+    }
+
+    @Test
+    fun createNote_existingPath_conflictsWithoutHttp() = runTest {
+        val r = repository.createNote(path, "x") // setUp 已插入该 entry
+        assertTrue(r is NoteSaveResult.Conflict)
+        assertEquals(0, server.requestCount) // 本地预检拦下，不发请求
+    }
+
+    @Test
+    fun createNote_remote422_conflicts() = runTest {
+        server.enqueue(MockResponse().setResponseCode(422).setBody("""{"message":"Invalid request"}"""))
+        val r = repository.createNote("Inbox/B.md", "x")
+        assertTrue(r is NoteSaveResult.Conflict)
+        assertNull(db.repoEntryDao().get("o/r", "Inbox/B.md")) // 未收敛任何本地状态
+    }
 }

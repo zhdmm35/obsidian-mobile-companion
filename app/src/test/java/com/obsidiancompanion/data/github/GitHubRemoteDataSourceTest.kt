@@ -375,4 +375,49 @@ class GitHubRemoteDataSourceTest {
             remote.getFileContent("o", "r", "A.md"),
         )
     }
+
+    /* ── createFile（新建笔记 / 快速收集：PUT 不带 sha）────────────────── */
+
+    @Test
+    fun createFile_ok_sendsBodyWithoutSha() = runTest {
+        val markdown = "分享的文本 https://example.com\n"
+        server.enqueue(json("""{"content":{"name":"N.md","path":"Inbox/N.md","sha":"newsha1"},"commit":{"sha":"c1"}}"""))
+        val r = remote.createFile(
+            owner = "o", repo = "r", path = "Inbox/N.md",
+            content = markdown.toByteArray(Charsets.UTF_8),
+            message = "mobile: create N.md", branch = "main",
+        )
+        assertTrue(r is GitHubResult.Ok)
+        assertEquals("newsha1", (r as GitHubResult.Ok).value.newSha)
+
+        val req = server.takeRequest()
+        assertEquals("PUT", req.method)
+        assertEquals("/repos/o/r/contents/Inbox/N.md", req.path)
+        val body = kotlinx.serialization.json.Json.parseToJsonElement(req.body.readUtf8()).jsonObject
+        // 仅创建语义的关键：body 绝不能带 sha 字段（带了就变成「更新」）
+        assertTrue("sha" !in body)
+        assertEquals("mobile: create N.md", body["message"]!!.jsonPrimitive.content)
+        assertEquals("main", body["branch"]!!.jsonPrimitive.content)
+        val decoded = java.util.Base64.getDecoder().decode(body["content"]!!.jsonPrimitive.content)
+        assertEquals(markdown, String(decoded, Charsets.UTF_8))
+    }
+
+    /** 路径已存在 → GitHub 422 → 归一为 Conflict（「已存在」，由调用方提示换名）。 */
+    @Test
+    fun createFile_422_mapsToConflict() = runTest {
+        server.enqueue(MockResponse().setResponseCode(422).setBody("""{"message":"Invalid request"}"""))
+        assertEquals(
+            GitHubResult.Fail(DomainError.Conflict, 422),
+            remote.createFile("o", "r", "A.md", "x".toByteArray(), "m", "main"),
+        )
+    }
+
+    @Test
+    fun createFile_403() = runTest {
+        server.enqueue(MockResponse().setResponseCode(403))
+        assertEquals(
+            GitHubResult.Fail(DomainError.Forbidden, 403),
+            remote.createFile("o", "r", "A.md", "x".toByteArray(), "m", "main"),
+        )
+    }
 }

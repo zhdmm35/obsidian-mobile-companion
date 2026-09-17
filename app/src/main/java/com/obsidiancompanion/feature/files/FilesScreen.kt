@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +84,58 @@ class FilesViewModel : ViewModel() {
 
     fun childCount(dir: RepoEntryEntity): Int = childrenByParent[dir.path]?.size ?: 0
 
+    /* ── 新建笔记（当前目录）────────────────────────────────── */
+
+    var createInFlight by mutableStateOf(false)
+        private set
+    var createError by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 在当前目录新建空 Markdown 并打开 Editor（§写路径与 Editor 同一收敛语义：
+     * 成功 → 异步 refreshTree 补齐整树；同名 → 内联错误；绝不覆盖已有文件）。
+     */
+    fun createNote(rawName: String, onCreated: (String) -> Unit) {
+        val fileName = sanitizeNoteName(rawName)
+        if (fileName == null) {
+            createError = "名字不可用：不能为空，不含 / \\ :，也不以 . 开头"
+            return
+        }
+        val folder = currentPath
+        val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
+        if (createInFlight) return
+        if (!AppGraph.network.isOnline) {
+            createError = "当前离线，无法新建笔记"
+            return
+        }
+        createInFlight = true
+        createError = null
+        viewModelScope.launch {
+            when (val r = AppGraph.noteRepository.createNote(path, "")) {
+                is com.obsidiancompanion.data.repository.NoteSaveResult.Saved -> {
+                    createInFlight = false
+                    AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree() }
+                    onCreated(path)
+                }
+                is com.obsidiancompanion.data.repository.NoteSaveResult.Conflict -> {
+                    createInFlight = false
+                    createError = "同名笔记已存在，换个名字吧"
+                }
+                is com.obsidiancompanion.data.repository.NoteSaveResult.Error -> {
+                    createInFlight = false
+                    createError = when (r.error) {
+                        com.obsidiancompanion.model.DomainError.Unauthorized,
+                        com.obsidiancompanion.model.DomainError.Forbidden,
+                        -> "Token 没有写入权限，请在设置中重新设置"
+                        com.obsidiancompanion.model.DomainError.NetworkUnavailable -> "当前离线，无法新建笔记"
+                        com.obsidiancompanion.model.DomainError.RateLimited -> "GitHub 接口限流，请稍后再试"
+                        else -> "创建失败，请稍后再试"
+                    }
+                }
+            }
+        }
+    }
+
     fun openFolder(fullPath: String) { pathSegments = fullPath.split("/") }
     fun pop() { pathSegments = pathSegments.dropLast(1) }
     fun navigateTo(index: Int) { pathSegments = if (index < 0) emptyList() else pathSegments.take(index + 1) }
@@ -96,12 +149,13 @@ internal fun indexByParent(tree: List<RepoEntryEntity>): Map<String?, List<RepoE
             children.sortedWith(compareBy({ it.kind != EntryKind.DIRECTORY }, { it.name }))
         }
 
-/** 文件浏览页（原型 renderFiles）：返回 + 面包屑 + 文件夹/文件/附件行 + 空文件夹态 */
+/** 文件浏览页（原型 renderFiles）：返回 + 面包屑 + 文件夹/文件/附件行 + 空文件夹态 + 新建笔记 */
 @Composable
 fun FilesScreen(
     onOpenNote: (String) -> Unit,
     onOpenImage: (String) -> Unit,
     onAttachmentTap: () -> Unit,
+    onOpenEditor: (String) -> Unit,
     viewModel: FilesViewModel = viewModel(),
 ) {
     // tree 变化时若当前层级已不存在（如仓库刷新删除目录），回到根目录
@@ -112,11 +166,27 @@ fun FilesScreen(
         }
     }
 
+    var showCreateDialog by remember { mutableStateOf(false) }
+    if (showCreateDialog) {
+        CreateNoteDialog(
+            folderLabel = viewModel.currentPath.ifEmpty { "根目录" },
+            creating = viewModel.createInFlight,
+            error = viewModel.createError,
+            onCreate = { raw ->
+                viewModel.createNote(raw) { path ->
+                    showCreateDialog = false
+                    onOpenEditor(path) // 创建成功直接进入编辑 —— 「随手记一笔」不打断
+                }
+            },
+            onDismiss = { showCreateDialog = false },
+        )
+    }
+
     val entries = viewModel.entries()
     val browsingFolder = viewModel.pathSegments.isNotEmpty()
 
     Column(Modifier.fillMaxSize()) {
-        // 顶栏：返回（根路径隐藏）+ 面包屑
+        // 顶栏：返回（根路径隐藏）+ 面包屑 + 新建
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -132,6 +202,7 @@ fun FilesScreen(
                 onNavigate = { viewModel.navigateTo(it) },
                 modifier = Modifier.weight(1f),
             )
+            AppIconButton(icon = AppIcons.Add, contentDescription = "新建笔记", onClick = { showCreateDialog = true })
         }
 
         // 列表走 LazyColumn（大文件夹只组合可见行）；空态保持原滚动容器

@@ -73,6 +73,14 @@ interface GitHubApi {
         @Url url: okhttp3.HttpUrl,
         @Body body: UpdateFileRequestDto,
     ): Response<UpdateFileResponseDto>
+
+    /** Contents create：body 不带 sha → 仅创建；路径已存在时 GitHub 返回 422。 */
+    @Headers("Accept: application/vnd.github+json")
+    @PUT
+    suspend fun createContent(
+        @Url url: okhttp3.HttpUrl,
+        @Body body: CreateFileRequestDto,
+    ): Response<UpdateFileResponseDto>
 }
 
 object GitHubApiFactory {

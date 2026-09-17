@@ -33,6 +33,7 @@ import com.obsidiancompanion.core.design.AppMotion
 import com.obsidiancompanion.core.ui.AppBottomNavigation
 import com.obsidiancompanion.core.ui.AppSnackbarHost
 import com.obsidiancompanion.core.ui.BottomNavItem
+import com.obsidiancompanion.feature.capture.QuickCaptureScreen
 import com.obsidiancompanion.feature.editor.EditorScreen
 import com.obsidiancompanion.feature.files.FilesScreen
 import com.obsidiancompanion.feature.home.HomeScreen
@@ -88,6 +89,15 @@ fun AppNavGraph() {
     val currentRoute = backStackEntry?.destination?.route
     val tabRoutes = setOf(Routes.HOME, Routes.FILES, Routes.SEARCH, Routes.SETTINGS)
     val showBottomBar = currentRoute in tabRoutes
+
+    // 系统分享接收：暂存文本存在且已进入主界面（不在启动门/Onboarding）时打开快速收集页。
+    // 未完成 Onboarding 时保持暂存 —— 完成引导到达主 tab 后自动接着打开。
+    val sharedText by AppGraph.pendingSharedText.collectAsState()
+    LaunchedEffect(sharedText, currentRoute) {
+        if (sharedText != null && currentRoute in tabRoutes) {
+            navController.navigate(Routes.QUICK_CAPTURE)
+        }
+    }
 
     fun navigateToTab(route: String) {
         navController.navigate(route) {
@@ -203,6 +213,9 @@ fun AppNavGraph() {
                     onOpenNote = { openNote(it) },
                     onOpenImage = { openViewer(it) },
                     onAttachmentTap = { showSnackbar("V1 仅支持阅读 Markdown 笔记") },
+                    onOpenEditor = { path ->
+                        navController.navigate(Routes.editor(URLEncoder.encode(path, "UTF-8")))
+                    },
                 )
             }
             composable(Routes.SEARCH) {
@@ -293,6 +306,13 @@ fun AppNavGraph() {
                 SyncScreen(
                     onBack = { navController.popBackStack() },
                     onOpenConflict = { navController.navigate(Routes.CONFLICT_DEMO) },
+                    onShowSnackbar = ::showSnackbar,
+                )
+            }
+            // 快速收集：系统分享文本 → 新笔记
+            composable(Routes.QUICK_CAPTURE) {
+                QuickCaptureScreen(
+                    onLeave = { navController.popBackStack() },
                     onShowSnackbar = ::showSnackbar,
                 )
             }

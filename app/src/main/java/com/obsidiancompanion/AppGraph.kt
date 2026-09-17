@@ -67,6 +67,12 @@ object AppGraph {
         RefreshTriggers(appScope, settings, network, indexRepository)
     }
 
+    /**
+     * 系统分享进来的文本（ACTION_SEND）：MainActivity 写入，AppNavGraph 观察并打开快速收集页。
+     * StateFlow 暂存 —— App 冷启动时导航尚未就绪也不丢。
+     */
+    val pendingSharedText = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     @Volatile
     private var appContext: Context? = null
 
