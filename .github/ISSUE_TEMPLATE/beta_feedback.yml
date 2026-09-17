@@ -1,0 +1,50 @@
+name: Beta testing feedback
+description: Report a real v0.1.1 test result or usability finding.
+title: "[Beta] "
+labels:
+  - beta-feedback
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please test the signed v0.1.1 APK with a repository you control. Never include access tokens, private repository URLs, or private note content.
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      placeholder: v0.1.1
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: Pixel 7, Android 15
+    validations:
+      required: true
+  - type: dropdown
+    id: scenario
+    attributes:
+      label: Scenario tested
+      options:
+        - Offline cached reading
+        - Markdown and Obsidian rendering
+        - Conflict-aware editing
+        - Phone and PC bidirectional sync
+        - Multiple scenarios
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+      description: Describe the steps and what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove tokens, private URLs, and private note content before posting.
+    validations:
+      required: false

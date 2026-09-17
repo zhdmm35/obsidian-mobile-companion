@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a reproducible problem in the Android app or desktop helper.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use synthetic note content. Do not include vault data, tokens, private screenshots, or private repository URLs.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App release or commit SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the smallest synthetic note or repository layout that reproduces the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove tokens, personal paths, repository names, and note content before posting.

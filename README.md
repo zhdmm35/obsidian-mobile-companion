@@ -6,7 +6,18 @@ An independent Android companion app for Markdown vaults stored in GitHub reposi
 
 一个独立的 Android 应用，用于浏览和编辑托管在 GitHub 仓库中的 Markdown 知识库。支持浏览与搜索笔记、渲染 Obsidian 常用语法、离线阅读已缓存笔记、编辑保存并显式处理冲突。另附 PC 端 `tools/vaultsync` 小工具，可将本地 Vault 目录与同一个 GitHub 仓库保持同步。
 
-> **Status / 状态:** pre-release（预发布）。There is no signed release APK yet; the debug APK on the Releases page is for personal testing only. 还没有正式签名版 APK，Releases 页面上的是 debug 测试包。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
+> **Status / 状态:** v0.1.1 release candidate（预发布候选）。A signed v0.1.1 APK is available from the [v0.1.1 Release](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/v0.1.1) for testing. Releases remain pre-release until the first stable feedback cycle is complete. v0.1.1 已提供签名 APK，正式稳定版会在第一轮真实用户反馈完成后发布。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
+
+## Project positioning / 项目定位
+
+This project is a GitHub Markdown knowledge-base mobile workflow, not only an Obsidian reader. It connects four pieces into one auditable loop:
+
+- mobile offline reading for cached notes;
+- safe editing with explicit remote-conflict review;
+- rendering for WikiLinks, callouts, tables, task lists, frontmatter, and embeds;
+- two-way synchronization between a phone and a PC vault through GitHub and `tools/vaultsync`.
+
+它解决的是 GitHub Markdown 知识库的移动端离线阅读、冲突安全编辑、WikiLink/Callout 渲染，以及 PC 与手机之间的双向同步问题，而不只是“又一个 Obsidian Android 客户端”。
 
 ---
 
@@ -113,6 +124,20 @@ See `tools/vaultsync/README.md` for configuration, logs, Windows autostart, and 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and pull request guidance. Please use synthetic notes in tests and never include personal vault content, access tokens, or private screenshots in issues or pull requests.
 
 本地检查与 PR 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。测试请使用虚构笔记；不要在 issue 或 PR 中包含个人知识库内容、访问令牌或隐私截图。
+
+## Maintainer workflow / 维护流程
+
+The repository uses Codex as an auditable maintenance assistant for issue triage, test generation, pull-request checks, and changelog drafts. The human maintainer reviews every result, decides what is accepted, and performs the final merge and release. Codex is given public repository metadata and synthetic fixtures only; private vault content and access tokens are never used as prompt data.
+
+GitHub Actions runs the Android unit tests and debug APK build, plus the `tools/vaultsync` test suite, on every pull request and push to `main`. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml), the [issue templates](.github/ISSUE_TEMPLATE/), [pull-request template](.github/pull_request_template.md), [security policy](SECURITY.md), and [ROADMAP.md].
+
+仓库把 Codex 用作可审计的维护助手：进行 Issue 分诊、测试生成、PR 检查和 changelog 草稿；每项结果都由人工维护者复核，最终合并和发布由维护者本人决定。Codex 只接触公开仓库元数据和虚构测试数据，不使用私人 Vault 内容或访问令牌。GitHub Actions 会在每个 PR 和 `main` 分支推送时运行 Android 单测、debug APK 构建以及 `tools/vaultsync` 测试。
+
+## Beta testing / 试用反馈
+
+Install the signed APK from the [v0.1.1 Release](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/v0.1.1), then test the complete loop with a repository you control: read cached notes offline, edit a note, create a deliberate remote conflict, render WikiLinks/callouts, and sync changes between the phone and `tools/vaultsync`. Use the [beta feedback issue form](.github/ISSUE_TEMPLATE/beta_feedback.yml) for results. Please report the device, Android version, app version, scenario, result, and sanitized logs; never include access tokens or private vault content.
+
+请真实试用 v0.1.1：在你能控制的 GitHub 仓库中测试离线阅读、编辑、远端冲突处理、WikiLink/Callout 渲染，以及手机与 `tools/vaultsync` 的双向同步。反馈请使用 [试用反馈 Issue 表单](.github/ISSUE_TEMPLATE/beta_feedback.yml)，填写设备、Android 版本、应用版本、测试场景、结果和脱敏日志，不要提交访问令牌或私人 Vault 内容。下载量、测试人数、关闭 Issue 数和修复项只按 GitHub Release 与真实反馈记录统计。
 
 ## License / 许可证
 

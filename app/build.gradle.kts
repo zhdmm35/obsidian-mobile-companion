@@ -6,6 +6,19 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+// Release signing is opt-in so public CI can still build an unsigned release without secrets.
+// Pass these values through -P properties or keep them in a local, ignored Gradle properties file.
+val releaseStoreFile = project.findProperty("releaseStoreFile") as String?
+val releaseStorePassword = project.findProperty("releaseStorePassword") as String?
+val releaseKeyAlias = project.findProperty("releaseKeyAlias") as String?
+val releaseKeyPassword = project.findProperty("releaseKeyPassword") as String?
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.obsidiancompanion"
     compileSdk = 35
@@ -14,8 +27,8 @@ android {
         applicationId = "com.obsidiancompanion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 默认正式 GitHub；本地 E2E 用 -PgithubApiBaseUrl=http://10.0.2.2:18080/ 覆盖
         buildConfigField(
@@ -25,9 +38,23 @@ android {
         )
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
