@@ -35,8 +35,10 @@ object AppTypography {
     val mdH1 = TextStyle(fontFamily = AppFonts.display, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.Medium)
     val mdH3 = TextStyle(fontFamily = AppFonts.display, fontSize = 18.sp, fontWeight = FontWeight.Medium)
     val mdH4 = TextStyle(fontFamily = AppFonts.body, fontSize = 16.5.sp, fontWeight = FontWeight.SemiBold)
-    val mdH5 = TextStyle(fontFamily = AppFonts.body, fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, color = AppColors.textSecondary)
-    val mdH6 = TextStyle(fontFamily = AppFonts.body, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppColors.textTertiary)
+    // mdH5/mdH6 带语义色：getter 每次读取当前 palette（AppColors 委托），主题切换后随之更新；
+    // 若做成 val 会在 object 初始化时冻结首次访问时的主题色
+    val mdH5: TextStyle get() = TextStyle(fontFamily = AppFonts.body, fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, color = AppColors.textSecondary)
+    val mdH6: TextStyle get() = TextStyle(fontFamily = AppFonts.body, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = AppColors.textTertiary)
     val embedTitle = TextStyle(fontFamily = AppFonts.display, fontSize = 15.5.sp, fontWeight = FontWeight.Medium)
 
     // ── 正文与 UI（Sans）──────────────────────────────────────

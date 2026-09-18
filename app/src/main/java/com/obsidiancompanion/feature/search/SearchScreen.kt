@@ -53,7 +53,6 @@ import com.obsidiancompanion.core.ui.AppChip
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SectionHeader
-import com.obsidiancompanion.core.ui.fadeUp
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -270,14 +269,14 @@ fun SearchScreen(
                     itemsIndexed(results, key = { _, entry -> entry.path }) { index, entry ->
                         if (index > 0) AppHorizontalDivider()
                         Row(
+                            // 不用 fadeUp：LazyColumn 行滚出/滚入会重置 remember，入场动画每次滚动都重放
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
                                     viewModel.onResultOpened()
                                     onOpenNote(entry.path)
                                 }
-                                .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical)
-                                .fadeUp(),
+                                .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {

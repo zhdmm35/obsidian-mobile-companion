@@ -517,11 +517,13 @@ fun ReaderNativeImage(
     modifier: Modifier = Modifier,
 ) {
     val isExternal = block.url.startsWith("http://") || block.url.startsWith("https://")
-    val state by produceState<ReaderImageUi>(ReaderImageUi.Loading, block.url, currentNotePath) {
-        value = if (isExternal) {
-            ReaderImageUi.Missing
-        } else {
-            AppGraph.imageRepository.loadNativeImage(block.url, currentNotePath).toReaderImageUi()
+    // 外部图是编译期已知的常量占位：直接以 Missing 为初值，不为它启动只为赋常量的协程
+    val state by produceState<ReaderImageUi>(
+        if (isExternal) ReaderImageUi.Missing else ReaderImageUi.Loading,
+        block.url, currentNotePath,
+    ) {
+        if (!isExternal) {
+            value = AppGraph.imageRepository.loadNativeImage(block.url, currentNotePath).toReaderImageUi()
         }
     }
     ReaderImageSlot(
@@ -568,7 +570,7 @@ private fun ReaderImageSlot(
             }
             ReaderImageUi.Loading -> ImagePlaceholderCard(
                 fileName = fileName,
-                caption = if (externalUrl != null) "外部图片 · V1 不加载" else null,
+                caption = null, // 外部图以 Missing 为初值，不会经过 Loading
             )
             ReaderImageUi.DecodeFailed -> ImagePlaceholderCard(
                 fileName = fileName,

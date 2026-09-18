@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色启动窗口（night 限定符接管，与 values/themes.xml 的浅色变体成对） -->
+    <style name="Theme.App" parent="android:Theme.Material.NoActionBar" />
+</resources>

@@ -43,8 +43,10 @@ import com.obsidiancompanion.data.repository.LinkResolution
 import com.obsidiancompanion.model.markdown.MdBlock
 import com.obsidiancompanion.model.markdown.MdInline
 import com.obsidiancompanion.model.markdown.findHeadingIndex
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withContext
 
 /**
  * 阅读器（原型 scr-reader）：无标题沉浸顶栏 + NoteHeader + Markdown 块渲染。
@@ -168,48 +170,52 @@ private fun ReaderContent(
     // §15：渲染前批量解析本文全部 WikiLink，未解析的以 muted 色显示（点击仍给 Snackbar）
     val deadLinks by produceState<Set<String>>(emptySet(), state.document, state.path) {
         val repoId = AppGraph.settings.flow.firstOrNull()?.repoId ?: return@produceState
-        val wikis = mutableListOf<MdInline.WikiLink>()
-        fun visitInlines(inlines: List<MdInline>) {
-            inlines.forEach { inline ->
-                when (inline) {
-                    is MdInline.WikiLink -> if (!inline.embed) wikis += inline
-                    is MdInline.Bold -> visitInlines(inline.children)
-                    is MdInline.Italic -> visitInlines(inline.children)
-                    is MdInline.Strike -> visitInlines(inline.children)
-                    is MdInline.Link -> visitInlines(inline.children)
-                    else -> Unit
-                }
-            }
-        }
-        fun visitBlocks(blocks: List<MdBlock>) {
-            blocks.forEach { block ->
-                when (block) {
-                    is MdBlock.Heading -> visitInlines(block.inlines)
-                    is MdBlock.Paragraph -> visitInlines(block.inlines)
-                    is MdBlock.Quote -> visitBlocks(block.children)
-                    is MdBlock.Callout -> visitBlocks(block.blocks)
-                    is MdBlock.BulletList -> block.items.forEach { visitInlines(it.inlines); visitBlocks(it.children) }
-                    is MdBlock.OrderedList -> block.items.forEach { visitInlines(it.inlines); visitBlocks(it.children) }
-                    is MdBlock.TaskList -> block.items.forEach { visitInlines(it.inlines); visitBlocks(it.children) }
-                    is MdBlock.Table -> {
-                        block.headers.forEach { visitInlines(it) }
-                        block.rows.forEach { row -> row.forEach { visitInlines(it) } }
+        // produceState 块跑在组合（主线程）上下文：遍历 AST + 逐链接内存扫描整体挪到 Default，
+        // 大库（数千 entry）多链接笔记打开时不再占 UI 线程
+        value = withContext(Dispatchers.Default) {
+            val wikis = mutableListOf<MdInline.WikiLink>()
+            fun visitInlines(inlines: List<MdInline>) {
+                inlines.forEach { inline ->
+                    when (inline) {
+                        is MdInline.WikiLink -> if (!inline.embed) wikis += inline
+                        is MdInline.Bold -> visitInlines(inline.children)
+                        is MdInline.Italic -> visitInlines(inline.children)
+                        is MdInline.Strike -> visitInlines(inline.children)
+                        is MdInline.Link -> visitInlines(inline.children)
+                        else -> Unit
                     }
+                }
+            }
+            fun visitBlocks(blocks: List<MdBlock>) {
+                blocks.forEach { block ->
+                    when (block) {
+                        is MdBlock.Heading -> visitInlines(block.inlines)
+                        is MdBlock.Paragraph -> visitInlines(block.inlines)
+                        is MdBlock.Quote -> visitBlocks(block.children)
+                        is MdBlock.Callout -> visitBlocks(block.blocks)
+                        is MdBlock.BulletList -> block.items.forEach { visitInlines(it.inlines); visitBlocks(it.children) }
+                        is MdBlock.OrderedList -> block.items.forEach { visitInlines(it.inlines); visitBlocks(it.children) }
+                        is MdBlock.TaskList -> block.items.forEach { visitInlines(it.inlines); visitBlocks(it.children) }
+                        is MdBlock.Table -> {
+                            block.headers.forEach { visitInlines(it) }
+                            block.rows.forEach { row -> row.forEach { visitInlines(it) } }
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+            visitBlocks(state.document.blocks)
+            // 整篇笔记只取一次 Tree 快照，逐链接内存解析（不再每条链接一次 Room 全表查询）
+            val entries = AppGraph.database.repoEntryDao().getAll(repoId)
+            val dead = mutableSetOf<String>()
+            for (wiki in wikis) {
+                when (AppGraph.linkResolver.resolveNote(entries, wiki.target, wiki.heading, state.path)) {
+                    LinkResolution.NotFound, is LinkResolution.Ambiguous -> dead += wiki.raw
                     else -> Unit
                 }
             }
+            dead
         }
-        visitBlocks(state.document.blocks)
-        // 整篇笔记只取一次 Tree 快照，逐链接内存解析（不再每条链接一次 Room 全表查询）
-        val entries = AppGraph.database.repoEntryDao().getAll(repoId)
-        val dead = mutableSetOf<String>()
-        for (wiki in wikis) {
-            when (AppGraph.linkResolver.resolveNote(entries, wiki.target, wiki.heading, state.path)) {
-                LinkResolution.NotFound, is LinkResolution.Ambiguous -> dead += wiki.raw
-                else -> Unit
-            }
-        }
-        value = dead
     }
 
     val links = remember(onOpenNote, onOpenExternalUrl, onShowSnackbar) {

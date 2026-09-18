@@ -38,8 +38,25 @@ class CaptureTextTest {
     }
 
     @Test
-    fun `url as first line kept as title base`() {
-        assertEquals("https://example.com/a?b=1", defaultCaptureTitle("https://example.com/a?b=1"))
+    fun `bare url as first line becomes host name`() {
+        // 裸链接含 : / 过不了 sanitizeNoteName —— 默认名取主机名，保证预填即可保存
+        assertEquals("example.com", defaultCaptureTitle("https://example.com/a?b=1"))
+        assertEquals("example.com", defaultCaptureTitle("https://www.example.com/"))
+        assertEquals("a.b", defaultCaptureTitle("HTTP://A.B/x/y"))
+    }
+
+    @Test
+    fun `title keeps interior hash and strips filename-hostile chars`() {
+        assertEquals("C# 学习笔记", defaultCaptureTitle("C# 学习笔记"))
+        // 含 : / 的散文标题折叠成合法文件名（sanitizeNoteName 会拒这些字符）
+        assertEquals("时间 2024 总结", defaultCaptureTitle("时间: 2024/总结"))
+    }
+
+    @Test
+    fun `leading dot title sanitized away`() {
+        // ". 开头"会被 sanitizeNoteName 拒（隐藏路径）——默认名剥掉开头 '.'
+        assertEquals("hidden 笔记", defaultCaptureTitle(".hidden 笔记"))
+        assertEquals("快速收集", defaultCaptureTitle("..."))
     }
 
     /* ── sanitizeCaptureFolder ───────────────────────────── */

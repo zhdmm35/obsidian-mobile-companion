@@ -74,6 +74,10 @@ class RepositoryIndexRepository(
             return RefreshOutcome.NotModified(enteredAt)
         }
 
+        // 本地写并发保护的水位线（与 observedChangedAt 同为 System.currentTimeMillis 时钟域）：
+        // 刷新进入之后才收敛的本地写（createNote/saveNote），远端 Tree 快照可能尚未包含其提交
+        val enteredAtMs = System.currentTimeMillis()
+
         _refreshUiState.value = _refreshUiState.value.copy(refreshing = true)
         try {
             val prior = db.repositoryStateDao().get(repoId)
@@ -95,12 +99,18 @@ class RepositoryIndexRepository(
                 is GitHubResult.Ok -> {
                     val old = db.repoEntryDao().getAll(repoId)
                     val diff = TreeDiff.compute(repoId, old, r.value, now)
+                    // 并发本地写保护：这些 entry 是刷新进入后才收敛的（observedChangedAt 晚于水位线），
+                    // 本次 Tree 快照可能早于其提交 —— 不按快照判删，留给下一次刷新对齐
+                    val recentLocalWrites = old.mapNotNullTo(mutableSetOf()) { e ->
+                        e.path.takeIf { e.observedChangedAt?.let { it > enteredAtMs } == true }
+                    }
+                    val deletablePaths = diff.deletedPaths.filter { it !in recentLocalWrites }
                     db.withTransaction {
                         // 增量入库：只写 Added/Changed/Deleted 行 —— 不再整表 delete+insert；
                         // 无变化的刷新对 repo_entries 零写入，Room 观察流不再被无意义重放
                         val upserts = diff.upsertEntries()
                         if (upserts.isNotEmpty()) db.repoEntryDao().insertAll(upserts)
-                        diff.deletedPaths.chunked(DELETE_CHUNK).forEach { chunk ->
+                        deletablePaths.chunked(DELETE_CHUNK).forEach { chunk ->
                             db.repoEntryDao().deleteByPaths(repoId, chunk)
                         }
                         db.repositoryStateDao().upsert(

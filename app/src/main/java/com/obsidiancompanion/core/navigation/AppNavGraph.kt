@@ -92,10 +92,12 @@ fun AppNavGraph() {
 
     // 系统分享接收：暂存文本存在且已进入主界面（不在启动门/Onboarding）时打开快速收集页。
     // 未完成 Onboarding 时保持暂存 —— 完成引导到达主 tab 后自动接着打开。
+    // 暂存由 QuickCaptureViewModel 进入时消费（系统返回不会触发本 effect 重开页面）；
+    // launchSingleTop 防连续两次分享在首个导航生效前叠出两个收集页。
     val sharedText by AppGraph.pendingSharedText.collectAsState()
     LaunchedEffect(sharedText, currentRoute) {
         if (sharedText != null && currentRoute in tabRoutes) {
-            navController.navigate(Routes.QUICK_CAPTURE)
+            navController.navigate(Routes.QUICK_CAPTURE) { launchSingleTop = true }
         }
     }
 

@@ -40,6 +40,7 @@ import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
+import com.obsidiancompanion.data.repository.NoteSaveResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -112,28 +113,31 @@ class FilesViewModel : ViewModel() {
         createError = null
         viewModelScope.launch {
             when (val r = AppGraph.noteRepository.createNote(path, "")) {
-                is com.obsidiancompanion.data.repository.NoteSaveResult.Saved -> {
+                is NoteSaveResult.Saved -> {
                     createInFlight = false
-                    AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree() }
+                    // 写操作后远端 Tree 必变：绕过 freshness window 强制补齐整树（如新目录的 DIRECTORY 行）
+                    AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
                     onCreated(path)
                 }
-                is com.obsidiancompanion.data.repository.NoteSaveResult.Conflict -> {
+                is NoteSaveResult.Conflict -> {
                     createInFlight = false
                     createError = "同名笔记已存在，换个名字吧"
                 }
-                is com.obsidiancompanion.data.repository.NoteSaveResult.Error -> {
+                is NoteSaveResult.Error -> {
                     createInFlight = false
-                    createError = when (r.error) {
-                        com.obsidiancompanion.model.DomainError.Unauthorized,
-                        com.obsidiancompanion.model.DomainError.Forbidden,
-                        -> "Token 没有写入权限，请在设置中重新设置"
-                        com.obsidiancompanion.model.DomainError.NetworkUnavailable -> "当前离线，无法新建笔记"
-                        com.obsidiancompanion.model.DomainError.RateLimited -> "GitHub 接口限流，请稍后再试"
-                        else -> "创建失败，请稍后再试"
-                    }
+                    createError = createWriteErrorMessage(
+                        r.error,
+                        offline = "当前离线，无法新建笔记",
+                        fallback = "创建失败，请稍后再试",
+                    )
                 }
             }
         }
+    }
+
+    /** 关掉新建对话框时清掉上次的内联错误，重开不再展示陈旧报错。 */
+    fun clearCreateError() {
+        createError = null
     }
 
     fun openFolder(fullPath: String) { pathSegments = fullPath.split("/") }
@@ -178,7 +182,10 @@ fun FilesScreen(
                     onOpenEditor(path) // 创建成功直接进入编辑 —— 「随手记一笔」不打断
                 }
             },
-            onDismiss = { showCreateDialog = false },
+            onDismiss = {
+                showCreateDialog = false
+                viewModel.clearCreateError()
+            },
         )
     }
 

@@ -168,23 +168,28 @@ private fun DomainError.tokenMessage(): String = when (this) {
     else -> "无法连接 GitHub，请稍后再试"
 }
 
+/** 极淡品牌纸纹背景（artwork/bg-welcome.jpg）；纸纹是浅色图，深色主题下换 palette 底色保文字对比。 */
+@Composable
+internal fun PaperBackground() {
+    if (isSystemInDarkTheme()) {
+        Box(Modifier.fillMaxSize().background(AppColors.background))
+    } else {
+        Image(
+            painter = painterResource(R.drawable.bg_welcome),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
 /** Onboarding 1/6 —— 欢迎（文案按在线优先语义更新）；极淡的品牌纸纹背景（artwork/bg-welcome.jpg） */
 @Composable
 fun OnboardingWelcomeScreen(
     onStart: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
-        // 纸纹是浅色图：深色主题下换 palette 底色，保证文字对比
-        if (isSystemInDarkTheme()) {
-            Box(Modifier.fillMaxSize().background(AppColors.background))
-        } else {
-            Image(
-                painter = painterResource(R.drawable.bg_welcome),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        PaperBackground()
         Column(
             modifier = Modifier
                 .fillMaxSize()

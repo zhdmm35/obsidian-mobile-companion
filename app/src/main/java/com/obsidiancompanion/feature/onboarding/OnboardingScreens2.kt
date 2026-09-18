@@ -5,9 +5,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,14 +34,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.obsidiancompanion.AppGraph
-import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -411,17 +406,8 @@ fun OnboardingDoneScreen(
     )
     val markdownCount = downloadViewModel.markdownCount
     Box(Modifier.fillMaxSize()) {
-        // 与欢迎页同款的极淡纸纹背景，首尾呼应；深色主题下换 palette 底色保对比
-        if (isSystemInDarkTheme()) {
-            Box(Modifier.fillMaxSize().background(AppColors.background))
-        } else {
-            Image(
-                painter = painterResource(R.drawable.bg_welcome),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+        // 与欢迎页同款的极淡纸纹背景，首尾呼应
+        PaperBackground()
         Column(
             modifier = Modifier
                 .fillMaxSize()

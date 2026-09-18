@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 启动窗口主题跟随系统 night mode（Compose 内由 AppTheme 接管浅色/深色） -->
-    <style name="Theme.App" parent="android:Theme.Material.NoActionBar" />
+    <!-- 浅色启动窗口（Compose 内由 AppTheme 接管）；深色变体在 values-night/themes.xml -->
+    <style name="Theme.App" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

@@ -26,10 +26,12 @@ import androidx.compose.ui.unit.dp
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppTypography
+import com.obsidiancompanion.model.DomainError
 
 /**
  * 新建笔记名称 → 合法文件名（null = 不可用）。
  * 规则：去首尾空白；不能为空；不含 `/` `\` `:`（防止逃逸出当前目录）；不以 `.` 开头（隐藏路径会被 Tree 过滤）；
+ * 不含 Windows 敌意字符/保留名、不以 `.` 结尾（[isWindowsHostileSegment]，否则 Windows 端无法检出）；
  * 缺 `.md` 后缀自动补齐；去后缀后正文为空（如只输了 ".md"）不可用。
  */
 fun sanitizeNoteName(raw: String): String? {
@@ -37,9 +39,35 @@ fun sanitizeNoteName(raw: String): String? {
     if (trimmed.isEmpty()) return null
     if (trimmed.any { it == '/' || it == '\\' || it == ':' }) return null
     if (trimmed.startsWith('.')) return null
+    if (isWindowsHostileSegment(trimmed)) return null
     val withExt = if (trimmed.endsWith(".md", ignoreCase = true)) trimmed else "$trimmed.md"
     if (withExt.removeSuffix(".md").isBlank()) return null
     return withExt
+}
+
+/**
+ * 新建/快速收集共用的写错误文案：鉴权与限流两处一致；
+ * 离线与兜底带各自动词（"新建"/"保存"），由调用方传入。
+ */
+fun createWriteErrorMessage(error: DomainError, offline: String, fallback: String): String = when (error) {
+    DomainError.Unauthorized, DomainError.Forbidden -> "Token 没有写入权限，请在设置中重新设置"
+    DomainError.NetworkUnavailable -> offline
+    DomainError.RateLimited -> "GitHub 接口限流，请稍后再试"
+    else -> fallback
+}
+
+/** Windows 保留设备名（NTFS 拒绝物化；不区分大小写、不含扩展名）。 */
+private val WINDOWS_RESERVED_NAMES: Set<String> =
+    setOf("CON", "PRN", "AUX", "NUL") + (1..9).map { "COM$it" } + (1..9).map { "LPT$it" }
+
+/**
+ * 段名是否对 Windows 检出敌意：含 `*` `?` `"` `<` `>` `|`、是保留设备名、或以 `.` 结尾。
+ * GitHub/git 允许这些字符，但 Windows 端 git/Obsidian 无法检出该路径 —— 创建入口一律拒绝。
+ */
+internal fun isWindowsHostileSegment(segment: String): Boolean {
+    if (segment.any { it == '*' || it == '?' || it == '"' || it == '<' || it == '>' || it == '|' }) return true
+    if (segment.endsWith('.')) return true
+    return segment.substringBeforeLast('.').uppercase() in WINDOWS_RESERVED_NAMES
 }
 
 /** 新建笔记对话框：名称输入 + 目标目录说明 + 内联错误；创建中禁用按钮防连点。 */
