@@ -285,6 +285,18 @@ fun AppNavGraph() {
                             showSnackbar("设备上没有可打开该链接的应用")
                         }
                     },
+                    onShare = { title, markdown ->
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(android.content.Intent.EXTRA_TITLE, title)
+                            putExtra(android.content.Intent.EXTRA_TEXT, markdown)
+                        }
+                        try {
+                            context.startActivity(android.content.Intent.createChooser(send, "分享笔记"))
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            showSnackbar("设备上没有可分享的应用")
+                        }
+                    },
                     onShowSnackbar = ::showSnackbar,
                 )
             }

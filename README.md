@@ -25,8 +25,8 @@ This project is a GitHub Markdown knowledge-base mobile workflow, not only an Ob
 
 **Android app / 安卓应用**
 
-- Connect to any GitHub repository with a fine-grained personal access token; browse files and folders, search note names, and keep favorites and recent notes.
-  使用 fine-grained 个人访问令牌连接任意 GitHub 仓库；浏览文件与文件夹、按笔记名搜索、收藏与最近打开。
+- Connect to any GitHub repository with a fine-grained personal access token; browse files and folders, search note names and the content of notes you have opened, and keep favorites and recent notes.
+  使用 fine-grained 个人访问令牌连接任意 GitHub 仓库；浏览文件与文件夹、按笔记名与已打开笔记的正文搜索、收藏与最近打开。
 - Render Markdown tables, task lists, Obsidian WikiLinks, callouts, frontmatter, and embedded images/notes (unsupported syntax degrades gracefully to plain text).
   渲染 Markdown 表格、任务列表、Obsidian WikiLink、Callout、Frontmatter 以及图片/笔记嵌入（暂不支持的语法会降级为原文显示，不会报错）。
 - View vault images full-screen: tap an image in the file browser or inside a note, pinch or double-tap to zoom, and swipe to browse other images in the same folder. Works offline for cached images.
@@ -35,6 +35,8 @@ This project is a GitHub Markdown knowledge-base mobile workflow, not only an Ob
   已缓存的笔记可离线阅读；未缓存内容需要联网。
 - Edit existing Markdown notes and save them to GitHub. If the remote note changed while you were editing, the app shows both versions and lets you review before resolving the conflict — no silent overwrite.
   编辑已有 Markdown 笔记并保存回 GitHub。如果编辑期间远端被改动，应用会并列展示两个版本供你确认，绝不静默覆盖。
+- Share a note's Markdown source to any app from the reader menu.
+  在阅读页菜单把笔记的 Markdown 原文分享给其他应用。
 - Automatic refresh with a freshness window, foreground and network-recovery triggers; background fetches are deduplicated.
   支持自动刷新（新鲜度窗口 + 前台与网络恢复触发），后台请求自动去重。
 

@@ -62,6 +62,7 @@ fun ReaderScreen(
     onOpenNote: (path: String, heading: String?) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
+    onShare: (title: String, markdown: String) -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: ReaderViewModel = viewModel(),
 ) {
@@ -123,6 +124,7 @@ fun ReaderScreen(
             onOpenNote = onOpenNote,
             onOpenImage = onOpenImage,
             onOpenExternalUrl = onOpenExternalUrl,
+            onShare = onShare,
             onShowSnackbar = onShowSnackbar,
             viewModel = viewModel,
         )
@@ -155,6 +157,7 @@ private fun ReaderContent(
     onOpenNote: (path: String, heading: String?) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
+    onShare: (title: String, markdown: String) -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: ReaderViewModel,
 ) {
@@ -346,6 +349,10 @@ private fun ReaderContent(
                 moreSheetVisible = false
                 clipboard.setText(AnnotatedString("/${state.path}"))
                 onShowSnackbar("文件路径已复制")
+            },
+            onShare = {
+                moreSheetVisible = false
+                onShare(state.title, state.markdown)
             },
             onRefreshNote = {
                 moreSheetVisible = false

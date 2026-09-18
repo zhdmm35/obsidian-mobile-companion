@@ -71,5 +71,6 @@ object AppIcons {
     val Cell by lazy { strokeIcon("cell", "M4 19V9M9 19V5M14 19V10M19 19V13") }
     val Battery by lazy { strokeIcon("batt", "M5 8H17A2 2 0 0 1 19 10V14A2 2 0 0 1 17 16H5A2 2 0 0 1 3 14V10A2 2 0 0 1 5 8Z", "M21.5 11V13") }
     val Add by lazy { strokeIcon("add", "M12 5.5V18.5M5.5 12H18.5") }
+    val Share by lazy { strokeIcon("share", "M15.5 5A2.5 2.5 0 1 0 20.5 5A2.5 2.5 0 1 0 15.5 5", "M3.5 12A2.5 2.5 0 1 0 8.5 12A2.5 2.5 0 1 0 3.5 12", "M15.5 19A2.5 2.5 0 1 0 20.5 19A2.5 2.5 0 1 0 15.5 19", "M15.4 6.5L8.6 10.5", "M8.6 13.5L15.4 17.5") }
     val Eye by lazy { strokeIcon("eye", "M2.5 12C4.5 7.6 8 5.5 12 5.5C16 5.5 19.5 7.6 21.5 12C19.5 16.4 16 18.5 12 18.5C8 18.5 4.5 16.4 2.5 12Z", "M9.7 12A2.3 2.3 0 1 0 14.3 12A2.3 2.3 0 1 0 9.7 12") }
 }

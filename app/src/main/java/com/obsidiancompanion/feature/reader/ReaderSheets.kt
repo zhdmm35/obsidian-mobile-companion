@@ -20,7 +20,7 @@ import com.obsidiancompanion.core.ui.KeyValueRow
 import com.obsidiancompanion.core.ui.SheetActionRow
 
 /**
- * Reader 更多菜单（原型 moreMenu）：编辑 / 收藏 / 文件信息 / 复制路径 / 刷新此笔记。
+ * Reader 更多菜单（原型 moreMenu）：编辑 / 收藏 / 文件信息 / 复制路径 / 分享笔记 / 刷新此笔记。
  * Phase 5 §4：「编辑」入口恢复，进入既有 EditorScreen（编辑已有 Markdown，不写 frontmatter）。
  */
 @Composable
@@ -32,6 +32,7 @@ fun ReaderMoreSheet(
     onToggleFavorite: () -> Unit,
     onShowFileInfo: () -> Unit,
     onCopyPath: () -> Unit,
+    onShare: () -> Unit,
     onRefreshNote: () -> Unit,
 ) {
     AppBottomSheet(onDismiss = onDismiss) {
@@ -44,6 +45,7 @@ fun ReaderMoreSheet(
         SheetActionRow(icon = AppIcons.Star, text = if (isFavorite) "取消收藏" else "收藏", onClick = onToggleFavorite)
         SheetActionRow(icon = AppIcons.Info, text = "查看文件信息", onClick = onShowFileInfo)
         SheetActionRow(icon = AppIcons.Copy, text = "复制文件路径", onClick = onCopyPath)
+        SheetActionRow(icon = AppIcons.Share, text = "分享笔记", onClick = onShare)
         SheetActionRow(icon = AppIcons.Refresh, text = "刷新此笔记", onClick = onRefreshNote)
     }
 }

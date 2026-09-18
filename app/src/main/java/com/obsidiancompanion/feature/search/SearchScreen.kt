@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,15 +56,21 @@ import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SectionHeader
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** 正文搜索输入防抖：文件名过滤是内存即时，正文要读缓存文件，延迟合键。 */
+private const val CONTENT_SEARCH_DEBOUNCE_MS = 250L
 
 /**
- * 搜索（§27）：V1 规则 —— 仅文件名（不含 .md）参与匹配，路径只展示；
- * 基于 Tree Cache 内存过滤（434 篇规模即时）。
+ * 搜索（§27 扩展）：文件名即时过滤（Tree Cache 内存，434 篇规模即时）+ 正文匹配（已缓存笔记，防抖异步）。
+ * 正文只覆盖 ContentCache 已缓存的笔记（即打开过的）：按需加载设计（§59/§62）下手机上没有未读笔记的正文。
  * 最近搜索 Room 持久化（§28）：提交搜索或点击结果时记录，同 query 更新时间。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -75,6 +82,10 @@ class SearchViewModel : ViewModel() {
     var results by mutableStateOf<List<RepoEntryEntity>>(emptyList())
         private set
 
+    /** 正文匹配结果（含已缓存正文的笔记；展示时与文件名命中去重，见 SearchScreen） */
+    var contentResults by mutableStateOf<List<ContentMatch>>(emptyList())
+        private set
+
     /** Room 里的最近搜索（最多 10 条，展示前 6） */
     var recentQueries by mutableStateOf<List<String>>(emptyList())
         private set
@@ -83,6 +94,7 @@ class SearchViewModel : ViewModel() {
         private set
 
     private var tree: List<RepoEntryEntity> = emptyList()
+    private var contentJob: kotlinx.coroutines.Job? = null
 
     val query: String get() = queryField.text
 
@@ -102,14 +114,14 @@ class SearchViewModel : ViewModel() {
                 tree = t
                 hasIndex = t.isNotEmpty()
                 recentQueries = recent.map { it.query }
-                recompute()
+                onQueryChanged()
             }
         }
     }
 
     fun onQueryChange(value: TextFieldValue) {
         queryField = value
-        recompute()
+        onQueryChanged()
     }
 
     val isIdle: Boolean get() = query.isBlank()
@@ -123,12 +135,18 @@ class SearchViewModel : ViewModel() {
     fun applyRecent(recent: String) {
         queryField = TextFieldValue(recent, TextRange(recent.length))
         recordRecent(recent)
-        recompute()
+        onQueryChanged()
     }
 
     fun clear() {
         queryField = TextFieldValue("")
+        onQueryChanged()
+    }
+
+    /** 查询或 tree 变化的统一入口：文件名即时重算 + 正文防抖重排。 */
+    private fun onQueryChanged() {
         recompute()
+        scheduleContentSearch()
     }
 
     private fun recompute() {
@@ -139,6 +157,34 @@ class SearchViewModel : ViewModel() {
             tree.filter { it.kind == EntryKind.MARKDOWN && it.name.removeSuffix(".md").contains(q, ignoreCase = true) }
         }
     }
+
+    /**
+     * 正文搜索：取消旧 job → 防抖 → 重扫缓存后匹配；空 query 直接清空。
+     * 每次都重扫（不缓存快照）：ContentCache 没有失效信号，用户打开新笔记后回到
+     * 本页时 ViewModel 仍存活，缓存旧快照会把新缓存的正文永远挡在结果外。
+     * 434 篇规模的单次 IO 重扫在防抖后可接受（与 Reader deadLinks 扫描同量级）。
+     */
+    private fun scheduleContentSearch() {
+        contentJob?.cancel()
+        val q = query.trim()
+        if (q.isEmpty()) {
+            contentResults = emptyList()
+            return
+        }
+        contentJob = viewModelScope.launch {
+            delay(CONTENT_SEARCH_DEBOUNCE_MS)
+            val snapshot = buildContentSnapshot()
+            contentResults = withContext(Dispatchers.Default) { searchContents(snapshot, q) }
+        }
+    }
+
+    /** 快照 = tree 中已缓存正文的 MARKDOWN 条目（按 blobSha 寻址读取）；未缓存的笔记不参与。 */
+    private suspend fun buildContentSnapshot(): List<Pair<RepoEntryEntity, String>> =
+        withContext(Dispatchers.IO) {
+            tree.filter { it.kind == EntryKind.MARKDOWN }.mapNotNull { entry ->
+                AppGraph.contentCache.get(entry.blobSha)?.let { bytes -> entry to String(bytes, Charsets.UTF_8) }
+            }
+        }
 
     private fun recordRecent(raw: String) {
         val q = raw.trim()
@@ -159,6 +205,11 @@ fun SearchScreen(
     val focusRequester = androidx.compose.runtime.remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     val results = viewModel.results
+    // 正文命中与文件名命中同篇去重：文件名区已能到达的笔记不再重复展示；
+    // remember 避免每次重组重算 O(n×m) 过滤
+    val contentMatches = remember(results, viewModel.contentResults) {
+        viewModel.contentResults.filter { match -> results.none { it.path == match.entry.path } }
+    }
 
     Column(Modifier.fillMaxSize()) {
         // 顶栏：返回 + 搜索输入框
@@ -198,7 +249,7 @@ fun SearchScreen(
                         decorationBox = { inner ->
                             Box {
                                 if (viewModel.query.isEmpty()) {
-                                    Text("搜索笔记文件名", style = AppTypography.bodyBase, color = AppColors.textMeta)
+                                    Text("搜索文件名或正文", style = AppTypography.bodyBase, color = AppColors.textMeta)
                                 }
                                 inner()
                             }
@@ -243,11 +294,11 @@ fun SearchScreen(
                 }
                 EmptyState(
                     icon = AppIcons.Search,
-                    title = "按文件名搜索",
-                    subtitle = if (viewModel.hasIndex) "输入关键词，实时过滤 Vault 中的全部笔记" else "还没有仓库索引，联网刷新一次后即可搜索",
+                    title = "按文件名与正文搜索",
+                    subtitle = if (viewModel.hasIndex) "输入关键词，文件名即时匹配；正文匹配覆盖打开过的笔记" else "还没有仓库索引，联网刷新一次后即可搜索",
                 )
             }
-            results.isEmpty() -> Column(
+            results.isEmpty() && contentMatches.isEmpty() -> Column(
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
@@ -256,7 +307,7 @@ fun SearchScreen(
                 EmptyState(
                     illustration = R.drawable.spot_search,
                     title = "没有找到「${viewModel.query.trim()}」相关的笔记",
-                    subtitle = "试试更短的关键词，或检查文件名",
+                    subtitle = "试试更短的关键词；正文匹配只覆盖打开过的笔记",
                 )
             }
             else -> {
@@ -265,37 +316,74 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = AppSpacing.screenBottomPadding),
                 ) {
-                    item { SectionHeader("搜索结果 · ${results.size}") }
-                    itemsIndexed(results, key = { _, entry -> entry.path }) { index, entry ->
-                        if (index > 0) AppHorizontalDivider()
-                        Row(
-                            // 不用 fadeUp：LazyColumn 行滚出/滚入会重置 remember，入场动画每次滚动都重放
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    viewModel.onResultOpened()
-                                    onOpenNote(entry.path)
+                    if (results.isNotEmpty()) {
+                        item { SectionHeader("文件名匹配 · ${results.size}") }
+                        itemsIndexed(results, key = { _, entry -> "n:${entry.path}" }) { index, entry ->
+                            if (index > 0) AppHorizontalDivider()
+                            Row(
+                                // 不用 fadeUp：LazyColumn 行滚出/滚入会重置 remember，入场动画每次滚动都重放
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.onResultOpened()
+                                        onOpenNote(entry.path)
+                                    }
+                                    .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(
+                                        entry.name.removeSuffix(".md"),
+                                        style = AppTypography.rowTitle,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        entry.path,
+                                        style = AppTypography.caption,
+                                        color = AppColors.textTertiary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
-                                .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(
-                                    entry.name.removeSuffix(".md"),
-                                    style = AppTypography.rowTitle,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    entry.path,
-                                    style = AppTypography.caption,
-                                    color = AppColors.textTertiary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                                Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
                             }
-                            Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    if (contentMatches.isNotEmpty()) {
+                        item { SectionHeader("正文匹配 · ${contentMatches.size}") }
+                        itemsIndexed(contentMatches, key = { _, match -> "c:${match.entry.path}" }) { index, match ->
+                            if (index > 0) AppHorizontalDivider()
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.onResultOpened()
+                                        onOpenNote(match.entry.path)
+                                    }
+                                    .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(
+                                        match.entry.name.removeSuffix(".md"),
+                                        style = AppTypography.rowTitle,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    // 摘要代替路径：正文命中的区分度在内容本身
+                                    Text(
+                                        match.snippet,
+                                        style = AppTypography.caption,
+                                        color = AppColors.textTertiary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
