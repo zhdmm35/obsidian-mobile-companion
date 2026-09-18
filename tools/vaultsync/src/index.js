@@ -1,5 +1,8 @@
-import { loadConfig } from './config.js';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+
+import { loadConfig, PID_FILE } from './config.js';
 import { createSync, gitErrorMessage } from './git.js';
+import { pidAlive } from './status-lib.js';
 import { startWatcher } from './watcher.js';
 
 function ts() {
@@ -16,6 +19,29 @@ async function main() {
   const cfgIdx = process.argv.indexOf('--config');
   const configPath = cfgIdx >= 0 ? process.argv[cfgIdx + 1] : undefined;
   const cfg = loadConfig(configPath);
+
+  // 单实例：pid 文件里的进程还活着就直接退出，避免双击 vbs / 重复自启产生第二个 daemon
+  // 互相抢 git 锁。--once 调试模式不受此限。
+  if (!once) {
+    let oldPid = NaN;
+    try {
+      oldPid = Number(readFileSync(PID_FILE, 'utf8').trim());
+    } catch {
+      // 没有 pid 文件：首次运行，或上次被强杀
+    }
+    if (oldPid !== process.pid && pidAlive(oldPid)) {
+      log(`VaultSync already running (pid ${oldPid}), exit`);
+      return;
+    }
+    writeFileSync(PID_FILE, String(process.pid));
+    process.on('exit', () => {
+      try {
+        rmSync(PID_FILE, { force: true });
+      } catch {
+        // 清理失败无妨，下次启动按存活检查覆盖
+      }
+    });
+  }
 
   log('VaultSync started');
   log(`Vault: ${cfg.vaultPath}`);

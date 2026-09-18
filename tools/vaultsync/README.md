@@ -23,11 +23,22 @@ Vault 文件变化后自动 commit + push，同时定时拉取手机推上来的
 
 ## 使用
 
+前置要求：安装 [Node.js](https://nodejs.org/) 与 [Git](https://git-scm.com/)，Vault 目录已是 git 仓库且关联了 GitHub remote。
+
 ```bash
 cd tools/vaultsync
-npm install
-npm start        # 常驻：startup 同步 + watcher + 5min periodic
-npm run sync     # 只同步一次然后退出（调试用）
+npm run setup      # 一键部署：环境检查 → 装依赖 → 配置向导 → 写入开机自启 → 启动并验证
+```
+
+setup 可重复执行（幂等）：已有配置跳过向导并显示摘要，自启文件重新生成覆盖；
+daemon 已在运行时跳过启动，重复部署不会产生第二个实例（pid 文件单实例守卫）。
+
+日常命令：
+
+```bash
+npm run status   # 查看 daemon 是否在跑、配置摘要、上次同步结果、日志尾部（不在跑时退出码非 0）
+npm run sync     # 只同步一次然后退出（调试用，报错直接可见）
+npm start        # 前台常驻（调试用；平时不需要，setup 已配置无窗口自启）
 npm test         # 单元测试（离线，临时 bare remote，不碰真实 Vault）
 ```
 
@@ -35,19 +46,24 @@ Ctrl+C 正常退出：关闭 watcher、停掉 timer，等在途 git 流程结束
 
 ## 开机自启（Windows）
 
-daemon 没有自动恢复能力：电脑重启或窗口被关后同步即停止，且不会有任何提示。
-本目录已提供自启方案（已配置好则跳过）：
+`npm run setup` 已自动完成：把写入了本机 `start-vaultsync.ps1` 绝对路径的
+`start-vaultsync.vbs` 放入「启动」文件夹（`shell:startup`），登录后无窗口启动 daemon
+（vbs 调用 ps1，`cmd /c` 追加写日志保持纯文本编码）。无需再手动编辑任何路径。
 
-- `start-vaultsync.vbs` 放在「启动」文件夹（`shell:startup`），登录后无窗口启动 daemon；
-  它调用 `start-vaultsync.ps1`（`cmd /c` 追加写日志，保持纯文本编码）。
-  vbs 里的路径是占位符，放入「启动」文件夹前先改成你机器上 ps1 的实际绝对路径。
-- 排查 daemon 是否在跑：`Get-CimInstance Win32_Process -Filter "Name='node.exe'"` 中应有
-  `node src\index.js`；或直接看 `vaultsync.log` 的最后写入时间是否还在更新。
+- 排查 daemon 是否在跑：`npm run status`。daemon 启动时写 `vaultsync.pid`，退出时删除；
+  检测以 pid 文件为准，旧版（无 pid 文件）启动的 daemon 按命令行匹配兜底。
 - 手动重启一次：`wscript start-vaultsync.vbs`（startup sync 会自动补推停机期间的改动）。
+- 停用自启：删除「启动」文件夹里的 `start-vaultsync.vbs`（Win+R 输入 `shell:startup` 打开）。
+- 本目录下的 `start-vaultsync.vbs` 是**模板**，仅供手动安装参考；实际自启文件由 setup 生成。
+  vaultsync 所在路径含非 ASCII 字符（如中文用户名目录）时 wscript 可能读错 vbs，
+  若自启失效请把 vaultsync 移到纯 ASCII 路径后重新运行 setup。
+
+非 Windows 系统：setup 只完成依赖与配置，自启请自行配置（systemd --user / launchd），
+或手动 `npm start` 常驻。
 
 ## 配置
 
-`vaultsync.config.json`（也可用 `--config <path>` 或环境变量 `VAULTSYNC_CONFIG` 指定）：
+`npm run setup` 的配置向导会生成 `vaultsync.config.json` 并逐项校验（目录存在、是 git 仓库、有 remote）。手动管理也可以（也可用 `--config <path>` 或环境变量 `VAULTSYNC_CONFIG` 指定）：
 
 ```json
 {
@@ -89,5 +105,5 @@ remote URL 中内嵌的凭据（`https://token@...`）会脱敏为 `***`。
 
 ## 边界（本阶段明确不做）
 
-多 Vault、冲突自动合并、GUI / 托盘、开机自启、Windows Service、
+多 Vault、冲突自动合并、GUI / 托盘、Windows Service、
 新建远程仓库、Android 端改动 —— 见 `docs/phase6/PHASE6A_VAULTSYNC.md`。

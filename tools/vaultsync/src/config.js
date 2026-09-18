@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const TOOL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const PID_FILE = path.join(TOOL_DIR, 'vaultsync.pid');
 
 export function loadConfig(configPath) {
   const file = configPath || process.env.VAULTSYNC_CONFIG || path.join(TOOL_DIR, 'vaultsync.config.json');

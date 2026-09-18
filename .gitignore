@@ -15,3 +15,4 @@
 tools/vaultsync/node_modules/
 /tools/vaultsync/vaultsync.config.json
 /tools/vaultsync/vaultsync.log
+/tools/vaultsync/vaultsync.pid

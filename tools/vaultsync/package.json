@@ -8,7 +8,9 @@
   "scripts": {
     "start": "node src/index.js",
     "sync": "node src/index.js --once",
-    "test": "node --test test/vaultsync.test.js"
+    "setup": "node src/setup.js",
+    "status": "node src/status.js",
+    "test": "node --test test/"
   },
   "dependencies": {
     "chokidar": "^4.0.3"
