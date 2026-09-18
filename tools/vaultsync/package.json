@@ -10,7 +10,7 @@
     "sync": "node src/index.js --once",
     "setup": "node src/setup.js",
     "status": "node src/status.js",
-    "test": "node --test test/"
+    "test": "node --test test/vaultsync.test.js test/setup.test.js"
   },
   "dependencies": {
     "chokidar": "^4.0.3"
