@@ -15,6 +15,8 @@ data class GithubRepo(
     val description: String?,
     val defaultBranch: String?,
     val updatedAt: String?,
+    /** 当前 Token 是否有写权限（permissions.push）；null = 响应未带 permissions，按可写处理、由写入时的错误兜底。 */
+    val canWrite: Boolean? = null,
 )
 
 data class RemoteTreeEntry(
@@ -52,6 +54,11 @@ data class UserDto(val login: String)
 data class RepoOwnerDto(val login: String)
 
 @Serializable
+data class RepoPermissionsDto(
+    val push: Boolean = false,
+)
+
+@Serializable
 data class RepoDto(
     val id: Long,
     val name: String,
@@ -61,6 +68,7 @@ data class RepoDto(
     @SerialName("default_branch") val defaultBranch: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
     val description: String? = null,
+    val permissions: RepoPermissionsDto? = null,
 )
 
 @Serializable
@@ -126,6 +134,7 @@ internal fun RepoDto.toDomain(): GithubRepo = GithubRepo(
     description = description,
     defaultBranch = defaultBranch,
     updatedAt = updatedAt,
+    canWrite = permissions?.push,
 )
 
 internal fun TreeEntryDto.toDomain(): RemoteTreeEntry = RemoteTreeEntry(

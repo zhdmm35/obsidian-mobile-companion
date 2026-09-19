@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -33,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -127,7 +129,13 @@ class OnboardingDownloadViewModel : ViewModel() {
 
             stage = "正在读取 Repository Tree……"
             progress = 0.6f
-            AppGraph.settings.setRepository(selected.owner, selected.name, defaultBranch)
+            AppGraph.settings.setRepository(
+                selected.owner,
+                selected.name,
+                defaultBranch,
+                // 写权限：metadata 优先，列表数据兜底；都没有则 null（未知，不拦截编辑）
+                canWrite = detail?.canWrite ?: selected.canWrite,
+            )
 
             // 用户刚选择仓库连接：必须真实拉取，不受 freshness window 去重（Phase 6B §5）
             when (val outcome = AppGraph.indexRepository.refreshTree(force = true)) {
@@ -253,6 +261,65 @@ fun OnboardingRepoScreen(
                 }
                 Spacer(Modifier.height(10.dp))
             }
+        }
+
+        Spacer(Modifier.height(18.dp))
+        Text(
+            "列表里没有？直接粘贴仓库链接",
+            style = AppTypography.caption,
+            color = AppColors.textTertiary,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BasicTextField(
+                value = sharedViewModel.urlInput,
+                onValueChange = sharedViewModel::onUrlChange,
+                textStyle = AppTypography.codeInline.copy(color = AppColors.textPrimary),
+                cursorBrush = SolidColor(AppColors.accent),
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                    Box(
+                        modifier = Modifier
+                            .height(44.dp)
+                            .clip(AppShapes.medium)
+                            .background(AppColors.surface)
+                            .border(
+                                1.dp,
+                                if (sharedViewModel.urlError == null) AppColors.borderStrong else AppColors.danger,
+                                AppShapes.medium,
+                            ),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Box(Modifier.padding(horizontal = 14.dp)) {
+                            if (sharedViewModel.urlInput.isEmpty()) {
+                                Text(
+                                    "https://github.com/owner/repo",
+                                    style = AppTypography.codeInline,
+                                    color = AppColors.textMeta,
+                                )
+                            }
+                            inner()
+                        }
+                    }
+                },
+            )
+            SecondaryButton(
+                text = if (sharedViewModel.urlChecking) "验证中……" else "添加",
+                onClick = { sharedViewModel.addRepoByUrl(onAdded = onNext) },
+                small = true,
+            )
+        }
+        if (sharedViewModel.urlError != null) {
+            Text(
+                sharedViewModel.urlError!!,
+                style = AppTypography.caption,
+                color = AppColors.danger,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
 
         Spacer(Modifier.height(8.dp))

@@ -37,6 +37,7 @@ import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.AppIconButton
+import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SecondaryButton
 import com.obsidiancompanion.data.repository.LinkResolution
@@ -164,6 +165,12 @@ private fun ReaderContent(
     val clipboard = LocalClipboardManager.current
     var moreSheetVisible by remember { mutableStateOf(false) }
     var fileInfoVisible by remember { mutableStateOf(false) }
+    var readOnlyNoticeVisible by remember { mutableStateOf(false) }
+
+    // 连接时记录的写权限（只读先行）：仅明确 false 时拦截编辑入口；null（未知）不拦，由保存错误兜底
+    val canWrite by produceState<Boolean?>(initialValue = null) {
+        value = AppGraph.settings.flow.firstOrNull()?.canWrite
+    }
 
     val listState = rememberLazyListState()
 
@@ -334,7 +341,11 @@ private fun ReaderContent(
             onDismiss = { moreSheetVisible = false },
             onEdit = {
                 moreSheetVisible = false
-                onEdit() // Phase 5 §4：进入 Editor（编辑已有 Markdown）
+                if (canWrite == false) {
+                    readOnlyNoticeVisible = true
+                } else {
+                    onEdit() // Phase 5 §4：进入 Editor（编辑已有 Markdown）
+                }
             },
             onToggleFavorite = {
                 moreSheetVisible = false
@@ -359,6 +370,16 @@ private fun ReaderContent(
                 onShowSnackbar("正在刷新 ${state.title}")
                 viewModel.refreshNote(onShowSnackbar)
             },
+        )
+    }
+
+    if (readOnlyNoticeVisible) {
+        ConfirmationDialog(
+            title = "当前 Token 只有只读权限",
+            message = "可以正常浏览笔记，但不能保存修改。要编辑，请在 GitHub 把这个 Token 的 Contents 权限改为 Read and write，然后回到设置页重新连接。",
+            confirmText = "知道了",
+            onConfirm = { readOnlyNoticeVisible = false },
+            onDismiss = { readOnlyNoticeVisible = false },
         )
     }
 

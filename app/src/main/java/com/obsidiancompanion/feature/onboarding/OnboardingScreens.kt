@@ -70,6 +70,13 @@ class OnboardingViewModel : ViewModel() {
     var selectedRepo by mutableStateOf<GithubRepo?>(null)
         private set
 
+    /** 「粘贴仓库链接」入口：输入、校验中与分类错误（§连接测试）。 */
+    var urlInput by mutableStateOf("")
+    var urlError by mutableStateOf<String?>(null)
+        private set
+    var urlChecking by mutableStateOf(false)
+        private set
+
     /** 选中仓库的 metadata（default_branch 来源，不假设 main —— Phase 1 修正 #3）。 */
     var repoDetail by mutableStateOf<GithubRepo?>(null)
         private set
@@ -157,6 +164,52 @@ class OnboardingViewModel : ViewModel() {
     }
 
     fun retryRepos() = loadRepos()
+
+    fun onUrlChange(value: String) {
+        urlInput = value
+        if (urlError != null) urlError = null
+    }
+
+    /**
+     * 粘贴链接添加仓库：解析 → GET repos/{owner}/{repo} 实测连通与权限（连接测试）。
+     * 成功等价于从列表选中（metadata 一并就位），由调用方导航到确认页；
+     * 失败给出分类原因，测不出原因就如实说未知，不误报。
+     */
+    fun addRepoByUrl(onAdded: () -> Unit) {
+        val parsed = parseRepoInput(urlInput)
+        if (parsed == null) {
+            urlError = "无法识别这个地址，示例：https://github.com/owner/repo"
+            return
+        }
+        val (owner, repo) = parsed
+        urlChecking = true
+        urlError = null
+        viewModelScope.launch {
+            when (val r = AppGraph.githubRemote.getRepository(owner, repo)) {
+                is com.obsidiancompanion.data.github.GitHubResult.Ok -> {
+                    selectedRepo = r.value
+                    repoDetail = r.value
+                    urlChecking = false
+                    onAdded()
+                }
+                is com.obsidiancompanion.data.github.GitHubResult.Fail -> {
+                    urlChecking = false
+                    urlError = r.error.repoAccessMessage()
+                }
+                is com.obsidiancompanion.data.github.GitHubResult.NotModified -> urlChecking = false
+            }
+        }
+    }
+}
+
+/** 仓库访问失败分类文案：凭据 / 权限 / 不存在 / 网络 / 限流，其余如实标注未知原因。 */
+private fun DomainError.repoAccessMessage(): String = when (this) {
+    DomainError.Unauthorized -> "Token 无效或已过期，请返回上一步重新输入"
+    DomainError.Forbidden -> "Token 无权访问该仓库，请确认已授权它"
+    DomainError.NotFound -> "找不到该仓库：请检查地址，或确认 Token 已授权它"
+    DomainError.NetworkUnavailable -> "网络不可用，请检查网络后重试"
+    DomainError.RateLimited -> "GitHub 接口限流，请稍后再试"
+    else -> "无法确认该仓库（原因未知：${this.name}），请稍后重试"
 }
 
 /** Token 阶段错误文案（§65：无效 Token 明确提示，不进入仓库选择）。 */
@@ -301,7 +354,15 @@ fun OnboardingTokenScreen(
             Spacer(Modifier.height(14.dp))
         }
         Text(
-            "在 GitHub → Settings → Developer settings 中创建 Fine-grained Token：仅选择此 Vault 仓库，并勾选 Repository contents: Read and write（读取与保存笔记）。",
+            "创建方法（最短路径）：",
+            style = AppTypography.caption,
+            color = AppColors.textTertiary,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "1. 打开 GitHub → Settings → Developer settings → Fine-grained tokens\n" +
+                "2. Repository access 只选择你的 Vault 仓库\n" +
+                "3. Permissions 中把 Contents 设为 Read and write",
             style = AppTypography.caption,
             color = AppColors.textTertiary,
         )
