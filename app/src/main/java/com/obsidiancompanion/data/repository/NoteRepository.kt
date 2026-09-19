@@ -228,6 +228,12 @@ class NoteRepository(
         return db.pendingEditDao().get(repoId, path)
     }
 
+    /** 编辑中自动暂存（§21 扩展）：防抖写入 pending_edits，杀进程/切后台后内容仍可恢复。 */
+    suspend fun stagePendingEdit(path: String, baseSha: String, content: String) {
+        val repoId = settings.flow.firstOrNull()?.repoId ?: return
+        stageDraft(repoId, path, baseSha, content)
+    }
+
     /** 冲突页展示用：远端最新版本（sha + 正文，§16）。 */
     suspend fun fetchRemoteVersion(path: String): RemoteNoteVersion {
         val ctx = writeContext() ?: return RemoteNoteVersion.Error(DomainError.Unknown)

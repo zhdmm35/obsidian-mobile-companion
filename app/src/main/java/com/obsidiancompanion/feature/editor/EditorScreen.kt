@@ -15,11 +15,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -27,10 +30,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -60,6 +66,10 @@ import com.obsidiancompanion.model.DomainError
 import com.obsidiancompanion.model.markdown.MdDocument
 import com.obsidiancompanion.model.markdown.MdInline
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -71,7 +81,7 @@ import kotlinx.coroutines.withContext
  */
 class EditorViewModel : ViewModel() {
 
-    /** §14：Editor 至少 Editing / Saving；SaveSuccess/SaveError 以一次性回调呈现（snackbar / 导航）。 */
+    /** §14：Editor 至少 Editing / Saving；成功走回调（snackbar+导航），失败走 saveFailure 状态对话框。 */
     enum class SaveState { EDITING, SAVING }
 
     var value by mutableStateOf(TextFieldValue(""))
@@ -84,11 +94,16 @@ class EditorViewModel : ViewModel() {
     var pendingDraft by mutableStateOf<PendingEditEntity?>(null)
         private set
 
-    /** §25/§26：401/403 时需要给「重新设置 Token」出口的认证错误文案。 */
-    var authErrorMessage by mutableStateOf<String?>(null)
+    /** 保存失败兜底（§23/§25/§26/§28）：对话框提供「复制全文」出口；auth=true 时附加「重新设置 Token」。 */
+    data class SaveFailure(val message: String, val auth: Boolean = false)
+    var saveFailure by mutableStateOf<SaveFailure?>(null)
         private set
 
-    fun dismissAuthError() { authErrorMessage = null }
+    fun dismissSaveFailure() { saveFailure = null }
+
+    /** 自动暂存指示：内容已写入本机草稿（与「已保存到 GitHub」严格区分，只声明本机事实）。 */
+    var draftStaged by mutableStateOf(false)
+        private set
 
     val isDirty: Boolean get() = value.text != original
     private var original: String = ""
@@ -124,6 +139,7 @@ class EditorViewModel : ViewModel() {
                     value = TextFieldValue(r.markdown, selection = TextRange(r.markdown.length))
                     loaded = true
                     pendingDraft = AppGraph.noteRepository.getPendingEdit(path)
+                    startAutoDraft(path)
                 }
                 is NoteOpenResult.OfflineNotCached -> {
                     original = ""
@@ -158,9 +174,9 @@ class EditorViewModel : ViewModel() {
 
     /**
      * 保存（§6-§15）：
-     * 成功 → onSaved（snackbar「已保存」+ 返回 Reader，Reader 经 Room 观察立即显示新内容）；
+     * 成功 → onSaved（snackbar「已保存到 GitHub」+ 返回 Reader，Reader 经 Room 观察立即显示新内容）；
      * 409 → onConflict（draft 已保留，进入 ConflictScreen）；
-     * 失败 → 留在 Editor，内容不丢（§23/§26/§28）。
+     * 失败 → saveFailure 对话框（保留内容 + 复制全文出口），留在 Editor（§23/§26/§28）。
      */
     fun save(onSaved: () -> Unit, onConflict: () -> Unit, onMessage: (String) -> Unit) {
         val path = loadedPath ?: return
@@ -168,8 +184,8 @@ class EditorViewModel : ViewModel() {
         if (!isDirty) { onSaved(); return } // 无修改：直接返回（§22）
         if (saveState == SaveState.SAVING) return // 防连点（§14）
         if (!AppGraph.network.isOnline) {
-            // §23：不做离线队列，保留当前内容，联网后再点保存
-            onMessage("无法保存到 GitHub，当前没有网络连接")
+            // §23：不做离线队列；内容已在草稿里，对话框给复制出口，联网后再点保存
+            saveFailure = SaveFailure("当前没有网络连接，无法保存到 GitHub")
             return
         }
         saveState = SaveState.SAVING
@@ -177,9 +193,11 @@ class EditorViewModel : ViewModel() {
             when (val r = AppGraph.noteRepository.saveNote(path, sha, value.text)) {
                 is NoteSaveResult.Saved -> {
                     saveState = SaveState.EDITING
+                    original = value.text // 已保存内容成为新基准：迟到的防抖发射走 clear 分支
+                    draftStaged = false
                     // §13：不阻塞 UI 的异步整树收敛
                     AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree() }
-                    onMessage("已保存") // §51：不展示 GitHub 技术细节
+                    onMessage("已保存到 GitHub") // 只声明可核实的事实（PUT 成功）
                     onSaved()
                 }
                 is NoteSaveResult.Conflict -> {
@@ -188,19 +206,19 @@ class EditorViewModel : ViewModel() {
                 }
                 is NoteSaveResult.Error -> {
                     saveState = SaveState.EDITING
-                    when (r.error) {
+                    saveFailure = when (r.error) {
                         DomainError.Unauthorized ->
-                            authErrorMessage = "GitHub 登录信息已失效" // §26
+                            SaveFailure("GitHub 登录信息已失效", auth = true) // §26
                         DomainError.Forbidden ->
-                            authErrorMessage = "当前 GitHub Token 没有保存笔记的权限" // §25
+                            SaveFailure("当前 GitHub Token 没有保存笔记的权限", auth = true) // §25
                         DomainError.NotFound ->
-                            onMessage("这篇笔记已经不存在于 GitHub") // §28
+                            SaveFailure("这篇笔记已经不存在于 GitHub") // §28
                         DomainError.NetworkUnavailable ->
-                            onMessage("无法保存到 GitHub，当前没有网络连接") // §23
+                            SaveFailure("当前没有网络连接，无法保存到 GitHub") // §23
                         DomainError.RateLimited ->
-                            onMessage("GitHub 接口限流，请稍后再试")
+                            SaveFailure("GitHub 接口限流，请稍后再试")
                         else ->
-                            onMessage("保存失败，请稍后再试（当前修改已保留在本机）")
+                            SaveFailure("保存失败，请稍后再试")
                     }
                 }
             }
@@ -209,10 +227,39 @@ class EditorViewModel : ViewModel() {
 
     /** 明确放弃修改时清掉暂存（用户已确认不要了）。 */
     fun discardAndLeave(onLeave: () -> Unit) {
+        autoDraftJob?.cancel() // 先停防抖，防止离开瞬间迟到的写入把刚清掉的草稿复活
         val path = loadedPath
         viewModelScope.launch { if (path != null) AppGraph.noteRepository.clearPendingEdit(path) }
         onLeave()
     }
+
+    /**
+     * 编辑中自动暂存（§21 扩展）：停笔 1.5s 后写入 pending_edits —— 杀进程 / 切后台不丢内容。
+     * 改回原文时清除草稿（无未保存内容）；保存成功后 original 前移，
+     * 迟到的防抖发射只会命中 clear 分支，不会把刚保存的内容复活成草稿。
+     */
+    @OptIn(FlowPreview::class)
+    private fun startAutoDraft(path: String) {
+        autoDraftJob?.cancel()
+        autoDraftJob = viewModelScope.launch {
+            snapshotFlow { value.text }
+                .drop(1) // 加载完成的初值不落草稿
+                .debounce(1500)
+                .collect { text ->
+                    val sha = baseSha ?: return@collect
+                    if (saveState == SaveState.SAVING) return@collect // 保存飞行中输入已禁用，防御
+                    if (text == original) {
+                        AppGraph.noteRepository.clearPendingEdit(path)
+                        draftStaged = false
+                    } else {
+                        AppGraph.noteRepository.stagePendingEdit(path, sha, text)
+                        draftStaged = true
+                    }
+                }
+        }
+    }
+
+    private var autoDraftJob: Job? = null
 
     private fun wrap(before: String, after: String) {
         val v = value
@@ -247,6 +294,7 @@ fun EditorScreen(
 
     var showDiscardDialog by remember { mutableStateOf(false) }
     val saving = viewModel.saveState == EditorViewModel.SaveState.SAVING
+    val clipboard = LocalClipboardManager.current
 
     // 数据安全：有修改时返回需确认（Phase 1 Discrepancy #6）；
     // 保存中（PUT 在飞行中）拦截系统返回 —— 半途离开会让远端/本地状态不确定
@@ -279,15 +327,42 @@ fun EditorScreen(
         )
     }
 
-    // §25/§26：Token 权限/失效 → 提供「重新设置 Token」出口，Editor 内容保留
-    viewModel.authErrorMessage?.let { message ->
-        ConfirmationDialog(
-            title = "无法保存到 GitHub",
-            message = message,
-            confirmText = "重新设置 Token",
-            dismissText = "继续编辑",
-            onConfirm = { onOpenToken() },
-            onDismiss = { viewModel.dismissAuthError() },
+    // 保存失败兜底：内容已在本机草稿，提供「复制全文」出口；认证类错误附加「重新设置 Token」（§25/§26）
+    viewModel.saveFailure?.let { failure ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissSaveFailure,
+            containerColor = AppColors.surface,
+            shape = AppShapes.medium,
+            title = { Text("无法保存到 GitHub", style = AppTypography.bodyBase) },
+            text = {
+                Text(
+                    failure.message + "\n\n当前修改已保留在本机草稿中，不会丢失。",
+                    style = AppTypography.bodySmall,
+                    color = AppColors.textTertiary,
+                )
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (failure.auth) {
+                        TextButton(onClick = {
+                            viewModel.dismissSaveFailure()
+                            onOpenToken()
+                        }) {
+                            Text("重新设置 Token", color = AppColors.accent)
+                        }
+                    }
+                    TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(viewModel.value.text))
+                        viewModel.dismissSaveFailure()
+                        onShowSnackbar("全文已复制，可粘贴到其它应用")
+                    }) {
+                        Text("复制全文", color = AppColors.accent)
+                    }
+                    TextButton(onClick = viewModel::dismissSaveFailure) {
+                        Text("继续编辑", color = AppColors.textTertiary)
+                    }
+                }
+            },
         )
     }
 
@@ -309,6 +384,11 @@ fun EditorScreen(
                 small = true,
             )
             Spacer(Modifier.weight(1f))
+            // 两级状态只声明本机事实：自动暂存成功显示「已暂存本机」；「已保存到 GitHub」仅在 PUT 成功的 snackbar
+            if (viewModel.draftStaged && viewModel.isDirty) {
+                Text("已暂存本机", style = AppTypography.caption, color = AppColors.textMeta)
+                Spacer(Modifier.width(10.dp))
+            }
             // 预览切换（仅加载完成后可用；激活时 accent 着色）
             if (viewModel.loaded) {
                 AppIconButton(
