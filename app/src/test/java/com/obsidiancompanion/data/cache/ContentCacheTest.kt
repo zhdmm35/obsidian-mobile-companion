@@ -26,6 +26,7 @@ class ContentCacheTest {
 
         cache.put("abc123", "# Hello".toByteArray())
         assertTrue(cache.exists("abc123"))
+        assertEquals(7L, cache.length("abc123"))
         assertArrayEquals("# Hello".toByteArray(), cache.get("abc123"))
         assertEquals(1, cache.count())
     }
@@ -68,6 +69,16 @@ class ContentCacheTest {
         assertEquals(0L, cache.size())
         assertEquals(0, cache.count())
         assertNull(cache.get("aaa111"))
+    }
+
+    @Test
+    fun `clearExcept preserves draft base blob`() = runTest {
+        val cache = newCache()
+        cache.put("aaa111", "draft base".toByteArray())
+        cache.put("bbb222", "disposable".toByteArray())
+        cache.clearExcept(setOf("aaa111"))
+        assertTrue(cache.exists("aaa111"))
+        assertFalse(cache.exists("bbb222"))
     }
 
     @Test

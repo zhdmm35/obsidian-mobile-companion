@@ -215,6 +215,7 @@ fun AppNavGraph() {
                     onOpenNote = { openNote(it) },
                     onOpenImage = { openViewer(it) },
                     onAttachmentTap = { showSnackbar("V1 仅支持阅读 Markdown 笔记") },
+                    onShowSnackbar = { showSnackbar(it) },
                     onOpenEditor = { path ->
                         navController.navigate(Routes.editor(URLEncoder.encode(path, "UTF-8")))
                     },

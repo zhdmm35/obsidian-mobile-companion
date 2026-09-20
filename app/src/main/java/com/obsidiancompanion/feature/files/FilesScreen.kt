@@ -38,10 +38,15 @@ import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.EmptyState
+import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.data.repository.NoteSaveResult
+import com.obsidiancompanion.data.repository.OfflineFolderManager
+import com.obsidiancompanion.util.Format
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -52,6 +57,10 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FilesViewModel : ViewModel() {
+    var folderStates by mutableStateOf<Map<String, OfflineFolderManager.FolderState>>(emptyMap())
+        private set
+    private var statusJob: Job? = null
+    private var repoId: String? = null
 
     var pathSegments by mutableStateOf<List<String>>(emptyList())
         private set
@@ -69,10 +78,25 @@ class FilesViewModel : ViewModel() {
     init {
         viewModelScope.launch {
             AppGraph.settings.flow.flatMapLatest { s ->
+                repoId = s.repoId
                 s.repoId?.let { AppGraph.indexRepository.observeTree(it) } ?: flowOf(emptyList())
             }.collect {
                 tree = it
                 childrenByParent = indexByParent(it)
+                refreshFolderStates()
+            }
+        }
+        viewModelScope.launch {
+            var previous = emptySet<String>()
+            AppGraph.offlineFolders.progress.collect { current ->
+                val id = repoId
+                if (id != null) {
+                    folderStates = folderStates.mapValues { (path, state) ->
+                        state.copy(downloading = current["$id\n$path"])
+                    }
+                }
+                if ((previous - current.keys).isNotEmpty()) refreshFolderStates()
+                previous = current.keys
             }
         }
     }
@@ -84,6 +108,42 @@ class FilesViewModel : ViewModel() {
     fun entries(): List<RepoEntryEntity> = childrenByParent[currentPath.ifEmpty { null }].orEmpty()
 
     fun childCount(dir: RepoEntryEntity): Int = childrenByParent[dir.path]?.size ?: 0
+
+    fun refreshFolderStates() {
+        statusJob?.cancel()
+        val id = repoId ?: return
+        val snapshot = tree
+        statusJob = viewModelScope.launch {
+            folderStates = childrenByParent[currentPath.ifEmpty { null }].orEmpty()
+                .filter { it.kind == EntryKind.DIRECTORY }.associate { entry ->
+                entry.path to AppGraph.offlineFolders.state(id, entry.path, snapshot)
+            }
+        }
+    }
+
+    fun downloadFolder(path: String) {
+        repoId?.let { AppGraph.offlineFolders.download(it, path) }
+    }
+
+    fun clearFolder(path: String, onDone: (String) -> Unit) {
+        val id = repoId ?: return
+        viewModelScope.launch {
+            try {
+                val removed = AppGraph.offlineFolders.clearFolder(id, path)
+                refreshFolderStates()
+                onDone("已清理 $removed 个缓存文件；未上传草稿已保留")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                onDone("清理失败，请稍后重试")
+            }
+        }
+    }
+
+    fun draftCount(path: String, onResult: (Int) -> Unit) {
+        val id = repoId ?: return
+        viewModelScope.launch { onResult(AppGraph.offlineFolders.draftCount(id, path)) }
+    }
 
     /* ── 新建笔记（当前目录）────────────────────────────────── */
 
@@ -140,10 +200,10 @@ class FilesViewModel : ViewModel() {
         createError = null
     }
 
-    fun openFolder(fullPath: String) { pathSegments = fullPath.split("/") }
-    fun pop() { pathSegments = pathSegments.dropLast(1) }
-    fun navigateTo(index: Int) { pathSegments = if (index < 0) emptyList() else pathSegments.take(index + 1) }
-    fun reset() { pathSegments = emptyList() }
+    fun openFolder(fullPath: String) { pathSegments = fullPath.split("/"); refreshFolderStates() }
+    fun pop() { pathSegments = pathSegments.dropLast(1); refreshFolderStates() }
+    fun navigateTo(index: Int) { pathSegments = if (index < 0) emptyList() else pathSegments.take(index + 1); refreshFolderStates() }
+    fun reset() { pathSegments = emptyList(); refreshFolderStates() }
 }
 
 /** 目录浏览索引：按 parentPath 分组并预排序（文件夹在前 + 名称字典序），一次构建全目录复用。纯函数，可单测。 */
@@ -160,6 +220,7 @@ fun FilesScreen(
     onOpenImage: (String) -> Unit,
     onAttachmentTap: () -> Unit,
     onOpenEditor: (String) -> Unit,
+    onShowSnackbar: (String) -> Unit = {},
     viewModel: FilesViewModel = viewModel(),
 ) {
     // tree 变化时若当前层级已不存在（如仓库刷新删除目录），回到根目录
@@ -168,9 +229,21 @@ fun FilesScreen(
             val current = viewModel.currentPath
             if (viewModel.tree.none { it.path == current }) viewModel.reset()
         }
+        viewModel.refreshFolderStates()
     }
 
     var showCreateDialog by remember { mutableStateOf(false) }
+    var clearTarget by remember { mutableStateOf<RepoEntryEntity?>(null) }
+    var draftCount by remember { mutableStateOf(0) }
+    clearTarget?.let { target ->
+        ConfirmationDialog(
+            title = "清理 ${target.name} 的离线缓存？",
+            message = "会清理此文件夹的笔记和图片缓存；被其他文件夹共用的内容仍保留。${if (draftCount > 0) "检测到 $draftCount 篇未上传草稿，草稿及其基准版本会保留。" else "未上传草稿会保留。"}",
+            confirmText = "清理缓存",
+            onConfirm = { clearTarget = null; viewModel.clearFolder(target.path, onShowSnackbar) },
+            onDismiss = { clearTarget = null },
+        )
+    }
     if (showCreateDialog) {
         CreateNoteDialog(
             folderLabel = viewModel.currentPath.ifEmpty { "根目录" },
@@ -224,7 +297,17 @@ fun FilesScreen(
                         EntryKind.DIRECTORY -> FolderRow(
                             entry = entry,
                             childCount = viewModel.childCount(entry),
+                            status = viewModel.folderStates[entry.path]?.let {
+                                if (it.bytes > 0) "${it.label} · ${Format.bytes(it.bytes)}" else it.label
+                            } ?: "检查中",
                             onClick = { viewModel.openFolder(entry.path) },
+                            onDownload = { viewModel.downloadFolder(entry.path) },
+                            onClear = {
+                                viewModel.draftCount(entry.path) {
+                                    draftCount = it
+                                    clearTarget = entry
+                                }
+                            },
                         )
                         EntryKind.MARKDOWN -> FileRow(entry = entry, onClick = { onOpenNote(entry.path) })
                         EntryKind.IMAGE -> AttachmentRow(entry = entry, onClick = { onOpenImage(entry.path) })

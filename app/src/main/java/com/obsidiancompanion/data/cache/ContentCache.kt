@@ -2,6 +2,8 @@ package com.obsidiancompanion.data.cache
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -15,6 +17,7 @@ class ContentCache(baseDir: File) {
     constructor(context: Context) : this(File(context.filesDir, "content_cache"))
 
     private val dir: File = baseDir
+    private val mutex = Mutex()
 
     private fun fileFor(sha: String): File {
         require(sha.length >= 3 && sha.all { it.isLetterOrDigit() }) { "bad sha: $sha" }
@@ -23,33 +26,48 @@ class ContentCache(baseDir: File) {
 
     suspend fun get(sha: String): ByteArray? = withContext(Dispatchers.IO) {
         val f = fileFor(sha)
-        if (f.isFile) f.readBytes() else null
+        mutex.withLock { if (f.isFile) f.readBytes() else null }
     }
 
     suspend fun put(sha: String, bytes: ByteArray): Unit = withContext(Dispatchers.IO) {
         val f = fileFor(sha)
-        if (f.isFile) return@withContext // 内容寻址：同 SHA 已缓存则跳过
-        val parent = f.parentFile ?: return@withContext
-        parent.mkdirs()
-        val tmp = File(parent, "${f.name}.tmp")
-        tmp.writeBytes(bytes)
-        if (!tmp.renameTo(f)) {
-            tmp.delete()
-            f.writeBytes(bytes) // rename 失败（如被占用）时退化为直写
+        mutex.withLock {
+            if (f.isFile) return@withLock // 内容寻址：同 SHA 已缓存则跳过
+            val parent = f.parentFile ?: return@withLock
+            parent.mkdirs()
+            val tmp = File(parent, "${f.name}.tmp")
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(f)) {
+                tmp.delete()
+                f.writeBytes(bytes) // rename 失败（如被占用）时退化为直写
+            }
         }
     }
 
-    suspend fun exists(sha: String): Boolean = withContext(Dispatchers.IO) { fileFor(sha).isFile }
+    suspend fun exists(sha: String): Boolean = withContext(Dispatchers.IO) {
+        mutex.withLock { fileFor(sha).isFile }
+    }
+
+    suspend fun length(sha: String): Long = withContext(Dispatchers.IO) {
+        mutex.withLock { fileFor(sha).takeIf { it.isFile }?.length() ?: 0L }
+    }
 
     suspend fun delete(sha: String): Unit = withContext(Dispatchers.IO) {
-        fileFor(sha).delete()
+        mutex.withLock { fileFor(sha).delete() }
     }
 
     /** 清空全部正文缓存（§61）：不影响 Token / 仓库选择 / Tree Cache / 收藏 / 阅读记录。 */
-    suspend fun clear(): Unit = withContext(Dispatchers.IO) {
-        dir.listFiles()?.forEach { shard ->
-            shard.listFiles()?.forEach { it.delete() }
-            shard.delete()
+    suspend fun clear(): Unit = clearExcept(emptySet())
+
+    /** 清除可重建缓存，保留待上传草稿对应的基准 blob。 */
+    suspend fun clearExcept(protectedShas: Set<String>): Unit = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            dir.listFiles()?.forEach { shard ->
+                shard.listFiles()?.forEach { file ->
+                    if (shard.name + file.name !in protectedShas) file.delete()
+                }
+                shard.delete()
+            }
         }
     }
 
@@ -60,10 +78,12 @@ class ContentCache(baseDir: File) {
     suspend fun stat(): Stat = withContext(Dispatchers.IO) {
         var bytes = 0L
         var count = 0
-        dir.walkTopDown().forEach { f ->
-            if (f.isFile) {
-                bytes += f.length()
-                if (!f.name.endsWith(".tmp")) count++
+        mutex.withLock {
+            dir.walkTopDown().forEach { f ->
+                if (f.isFile) {
+                    bytes += f.length()
+                    if (!f.name.endsWith(".tmp")) count++
+                }
             }
         }
         Stat(bytes, count)

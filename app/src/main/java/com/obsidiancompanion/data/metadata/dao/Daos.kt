@@ -107,6 +107,12 @@ interface RecentSearchDao {
 /** Phase 5 §20-§21：PendingEdit（保存前暂存 / 成功清除）。 */
 @Dao
 interface PendingEditDao {
+    @Query("SELECT * FROM pending_edits")
+    suspend fun getAll(): List<PendingEditEntity>
+
+    @Query("SELECT * FROM pending_edits WHERE repoId = :repoId")
+    suspend fun getAll(repoId: String): List<PendingEditEntity>
+
 
     @Query("SELECT * FROM pending_edits WHERE repoId = :repoId AND path = :path")
     suspend fun get(repoId: String, path: String): PendingEditEntity?

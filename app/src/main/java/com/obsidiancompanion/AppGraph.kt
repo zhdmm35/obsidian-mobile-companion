@@ -10,6 +10,7 @@ import com.obsidiancompanion.data.metadata.AppDatabase
 import com.obsidiancompanion.data.network.NetworkMonitor
 import com.obsidiancompanion.data.repository.ImageRepository
 import com.obsidiancompanion.data.repository.NoteRepository
+import com.obsidiancompanion.data.repository.OfflineFolderManager
 import com.obsidiancompanion.data.repository.RepositoryIndexRepository
 import com.obsidiancompanion.data.repository.VaultLinkResolver
 import com.obsidiancompanion.data.settings.SettingsRepository
@@ -60,6 +61,9 @@ object AppGraph {
     }
     val imageRepository: ImageRepository by lazy {
         ImageRepository(linkResolver, githubRemote, contentCache, settings, network)
+    }
+    val offlineFolders: OfflineFolderManager by lazy {
+        OfflineFolderManager(database, contentCache, noteRepository, imageRepository, linkResolver, appScope)
     }
 
     /** Phase 6B：自动刷新触发器（foreground / network recovery），仍走唯一 refreshTree(force=false)。 */

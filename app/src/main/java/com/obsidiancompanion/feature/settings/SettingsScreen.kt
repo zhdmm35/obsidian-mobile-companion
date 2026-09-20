@@ -67,9 +67,10 @@ class SettingsViewModel : ViewModel() {
     /** §60/§61：只清 Content Cache —— 不动 Token / 仓库选择 / Tree Cache / 收藏 / 阅读记录 / 搜索历史。 */
     fun clearCache(onDone: (String) -> Unit) {
         viewModelScope.launch {
-            AppGraph.contentCache.clear()
+            val protected = AppGraph.database.pendingEditDao().getAll().map { it.baseSha }.toSet()
+            AppGraph.contentCache.clearExcept(protected)
             refreshCacheStats()
-            onDone("内容缓存已清除，浏览与搜索不受影响")
+            onDone("内容缓存已清理，未上传草稿已保留")
         }
     }
 
@@ -78,7 +79,8 @@ class SettingsViewModel : ViewModel() {
         viewModelScope.launch {
             val old = AppGraph.settings.flow.first()
             old.repoId?.let { AppGraph.indexRepository.clearRepositoryData(it) }
-            AppGraph.contentCache.clear()
+            val protected = AppGraph.database.pendingEditDao().getAll().map { it.baseSha }.toSet()
+            AppGraph.contentCache.clearExcept(protected)
             AppGraph.settings.clearRepository()
             onDone()
         }
@@ -117,7 +119,7 @@ fun SettingsScreen(
     if (showClearCacheDialog) {
         ConfirmationDialog(
             title = "清除内容缓存？",
-            message = "只清除已缓存的笔记正文。浏览、搜索、收藏和阅读记录不受影响；已缓存过的笔记需联网重新获取。",
+            message = "清除已缓存的笔记和图片。未上传草稿及其基准版本会保留；其他内容需联网重新获取。",
             confirmText = "清除缓存",
             onConfirm = {
                 showClearCacheDialog = false
