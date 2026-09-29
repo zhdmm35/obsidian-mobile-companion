@@ -1,12 +1,29 @@
 # Obsidian Mobile Companion
 
+让电脑和安卓手机通过你自己的 GitHub 仓库同步 Markdown 笔记。电脑端自动同步，手机端阅读、缓存与编辑。
+
+## 下载与上手
+
+| 你要安装什么 | 下载 | 使用要求 |
+|---|---|---|
+| **Windows 笔记自动同步工具 · VaultSync v0.2.0 正式版** | [下载 Windows x64 便携包](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/vaultsync-v0.2.0/VaultSync-v0.2.0-windows-x64.zip) · [版本说明](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/vaultsync-v0.2.0) | 内含 Node.js、Git，无需另装运行环境；需要自己的 GitHub 仓库 |
+| **Android 笔记应用 · v0.1.1 候选版** | [下载签名 APK](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/v0.1.1/obsidian-mobile-companion-v0.1.1.apk) | Android 8.0+；需要 GitHub 仓库和读写令牌；仍为预发布 |
+
+Windows：**解压 → 双击 `VaultSync.vbs` → 选择笔记目录、填写仓库地址 → 检查配置并启用同步**。无需打开终端或编辑 JSON。便携包约 208 MB，首次连接可能需要完成 GitHub 登录。
+
+![Windows 配置窗口](artwork/vaultsync-setup.png)
+
+已有本地笔记请连接空仓库；从 GitHub 下载已有笔记请选空文件夹。两边都有内容时工具会停止并提示。启用后会上传未被 Git 忽略的文件，请先核对目录。冲突需要手动处理，当前不支持自动创建 GitHub 仓库。详细步骤见 [桌面工具使用说明](tools/vaultsync/README.md)。
+
+适合已经使用 GitHub 存放笔记、希望电脑自动同步和手机阅读编辑的人。首次使用 GitHub 的用户仍需准备仓库；安卓端仍需创建访问令牌。
+
 ![Cover / 封面](artwork/cover.jpg)
 
 An independent Android companion app for Markdown vaults stored in GitHub repositories. Browse and search your notes, render common Obsidian syntax, read cached notes offline, and edit existing notes with explicit conflict handling. Ships with `tools/vaultsync`, a small desktop daemon that keeps a PC-side vault directory in sync with the same GitHub repository.
 
 一个独立的 Android 应用，用于浏览和编辑托管在 GitHub 仓库中的 Markdown 知识库。支持浏览与搜索笔记、渲染 Obsidian 常用语法、离线阅读已缓存笔记、编辑保存并显式处理冲突。另附 PC 端 `tools/vaultsync` 小工具，可将本地 Vault 目录与同一个 GitHub 仓库保持同步。
 
-> **Status / 状态:** v0.1.1 release candidate（预发布候选）。A signed v0.1.1 APK is available from the [v0.1.1 Release](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/v0.1.1) for testing. Releases remain pre-release until the first stable feedback cycle is complete. v0.1.1 已提供签名 APK，正式稳定版会在第一轮真实用户反馈完成后发布。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
+> **Status / 状态:** Windows VaultSync v0.2.0 已正式发布，提供含运行环境的便携包；Android v0.1.1 仍为预发布候选，提供签名 APK 供试用。本次桌面版发布不包含新的 Android APK。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
 
 ## Project positioning / 项目定位
 
@@ -50,6 +67,8 @@ This project is a GitHub Markdown knowledge-base mobile workflow, not only an Ob
   冲突时安全中止、双方内容都保留；网络失败只记日志，下个周期自动重试。
 - Optional Windows autostart via the Startup folder (see `tools/vaultsync/README.md`).
   支持通过「启动」文件夹实现 Windows 开机自启（见 `tools/vaultsync/README.md`）。
+- Guided Windows setup, real sync results, pause/resume, and a portable package with bundled runtimes; a CLI uses the same configuration checks.
+  Windows 图形向导支持目录选择、配置检查、真实同步结果、暂停与恢复；便携包自带运行环境，CLI 复用相同配置检查。
 
 ## How it works / 工作原理
 
@@ -61,8 +80,8 @@ This project is a GitHub Markdown knowledge-base mobile workflow, not only an Ob
 
 - The app talks to the GitHub REST API directly; there is no app-owned backend service and no account server. Note content is read from and written to the repository you choose.
   应用直连 GitHub REST API，没有自建后端服务，也没有账号服务器。笔记内容只读写你指定的仓库。
-- vaultsync runs plain `git` commands (`status → add → commit → fetch → rebase → push`) against the configured vault, which must already be a git clone of the same repository.
-  vaultsync 对配置的 Vault 目录执行普通 git 命令（`status → add → commit → fetch → rebase → push`），该目录必须是同一仓库的 git 克隆。
+- vaultsync runs plain `git` commands (`status → add → commit → fetch → rebase → push`) against the configured vault. Setup can connect local notes to an empty repository or clone remote notes into an empty folder.
+  vaultsync 对配置目录执行普通 git 命令；向导可将本地笔记连接到空仓库，或把远端笔记克隆到空文件夹。
 
 ## Build and test / 构建与测试
 
@@ -79,16 +98,13 @@ Requirements / 环境要求：Android SDK 35, JDK 17。The app supports Android 
 ./gradlew.bat connectedDebugAndroidTest
 ```
 
-The desktop helper requires Node.js and Git / 桌面同步工具需要 Node.js 和 Git：
+For desktop source development, install Node.js and Git. End users can use the portable download above / 桌面源码开发需要 Node.js 和 Git；普通用户请使用顶部便携包：
 
 ```powershell
 cd tools/vaultsync
 npm ci
-Copy-Item vaultsync.config.example.json vaultsync.config.json
-# Edit vaultsync.config.json and set vaultPath to your own Git-backed vault.
-# 编辑 vaultsync.config.json，把 vaultPath 改成你自己的 git 仓库 Vault 路径。
 npm test
-npm start
+npm run setup
 ```
 
 `vaultsync.config.json` is machine-specific and is ignored by Git. Review the configured vault and remote before starting the helper: it automatically commits and pushes local changes.

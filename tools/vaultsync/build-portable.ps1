@@ -12,6 +12,7 @@ foreach ($item in @('src', 'node_modules', 'gui.ps1', 'VaultSync.cmd', 'VaultSyn
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $item) -Destination $destination -Recurse
 }
 Copy-Item -LiteralPath $node -Destination "$destination/runtime/node.exe"
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../../LICENSE') -Destination "$destination/LICENSE"
 New-Item -ItemType Directory -Path "$destination/runtime/git" -Force | Out-Null
 foreach ($item in @('bin', 'cmd', 'etc', 'mingw64', 'usr', 'LICENSE.txt')) {
     Copy-Item -LiteralPath (Join-Path $gitRoot $item) -Destination "$destination/runtime/git" -Recurse
