@@ -14,6 +14,7 @@
     "configure": "node src/setup.js --reconfigure",
     "doctor": "node src/manage.js doctor",
     "build:portable": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File build-portable.ps1",
+    "build:light": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File build-portable.ps1 -Light",
     "stop": "node src/manage.js stop",
     "pause": "node src/manage.js pause",
     "resume": "node src/manage.js resume",

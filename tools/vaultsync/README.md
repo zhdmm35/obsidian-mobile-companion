@@ -25,6 +25,8 @@ Vault 文件变化后自动 commit + push，同时定时拉取手机推上来的
 
 ### Windows 图形配置（推荐）
 
+已有 Node.js 20+ 和 Git（在 PATH 中可用）时，请下载 Release 的 `VaultSync-v0.2.0-windows-light.zip`。轻量包包含脚本和依赖，使用本机运行环境，无需 npm install。启动窗口检查 Node.js、Git 命令是否存在，缺少时提示使用完整包。完整包自带运行环境，优先使用包内版本，适合未安装或希望固定运行版本的用户。
+
 使用便携包：解压到一个固定目录，双击 **VaultSync.vbs**（也可使用 VaultSync.cmd），无需安装 Node.js、Git 或编辑 JSON。请先解压，不能直接在压缩包内启动；启用自启后不要移动这个目录，移动后需重新启用。
 
 1. 选择 Obsidian 笔记目录。
@@ -71,6 +73,8 @@ npm test         # 单元测试（离线，临时 bare remote，不碰真实 Vau
 Ctrl+C 正常退出：关闭 watcher、停掉 timer，等在途 git 流程结束后退出。
 
 ### 制作 Windows 便携包
+
+制作不含运行环境的轻量包：执行 `npm run build:light`，产物为 `dist/VaultSync-light-时间.zip`。此方式不要求打包机安装完整 Git for Windows，但需要先准备 npm 依赖。
 
 在安装了 Node.js、完整 Git for Windows 的开发机执行 `npm ci`、`npm test`，再执行 `npm run build:portable`。产物在 `dist/VaultSync-时间.zip`，包含 Node.js、Git（含 Credential Manager）、依赖和分发许可；不包含本机配置、笔记、日志或登录凭据。依赖仍在版本锁文件中管理。便携包以开发机 Windows 架构为准；源码方式的 CLI 可继续在其他系统使用。
 

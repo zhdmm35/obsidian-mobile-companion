@@ -6,10 +6,13 @@
 
 | 你要安装什么 | 下载 | 使用要求 |
 |---|---|---|
+| **Windows 轻量版 · 本机已有 Node.js 和 Git** | [下载轻量包](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/vaultsync-v0.2.0/VaultSync-v0.2.0-windows-light.zip) | 使用 PATH 中的 Node.js 20+ 和 Git；已包含工具依赖，无需 npm install |
 | **Windows 笔记自动同步工具 · VaultSync v0.2.0 正式版** | [下载 Windows x64 便携包](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/vaultsync-v0.2.0/VaultSync-v0.2.0-windows-x64.zip) · [版本说明](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/vaultsync-v0.2.0) | 内含 Node.js、Git，无需另装运行环境；需要自己的 GitHub 仓库 |
 | **Android 笔记应用 · v0.1.1 候选版** | [下载签名 APK](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/v0.1.1/obsidian-mobile-companion-v0.1.1.apk) | Android 8.0+；需要 GitHub 仓库和读写令牌；仍为预发布 |
 
 Windows：**解压 → 双击 `VaultSync.vbs` → 选择笔记目录、填写仓库地址 → 检查配置并启用同步**。无需打开终端或编辑 JSON。便携包约 208 MB，首次连接可能需要完成 GitHub 登录。
+
+本机已安装 Node.js 和 Git，选轻量包即可，不需要再下载运行环境；尚未安装或不确定，选完整便携包。两种包的操作相同，启动时会检查能否找到 Node.js 和 Git，缺失时提示使用完整包。
 
 ![Windows 配置窗口](artwork/vaultsync-setup.png)
 
