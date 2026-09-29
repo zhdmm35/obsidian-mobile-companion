@@ -10,7 +10,14 @@
     "sync": "node src/index.js --once",
     "setup": "node src/setup.js",
     "status": "node src/status.js",
-    "test": "node --test test/vaultsync.test.js test/setup.test.js"
+    "gui": "powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File gui.ps1",
+    "configure": "node src/setup.js --reconfigure",
+    "doctor": "node src/manage.js doctor",
+    "build:portable": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File build-portable.ps1",
+    "stop": "node src/manage.js stop",
+    "pause": "node src/manage.js pause",
+    "resume": "node src/manage.js resume",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "chokidar": "^4.0.3"

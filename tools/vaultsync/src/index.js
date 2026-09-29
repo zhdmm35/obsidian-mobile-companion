@@ -1,6 +1,6 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
-import { loadConfig, PID_FILE } from './config.js';
+import { loadConfig, PID_FILE, PAUSE_FILE, RESULT_FILE } from './config.js';
 import { createSync, gitErrorMessage } from './git.js';
 import { pidAlive } from './status-lib.js';
 import { startWatcher } from './watcher.js';
@@ -12,8 +12,6 @@ function ts() {
 }
 const log = (...a) => console.log(ts(), ...a);
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 async function main() {
   const once = process.argv.includes('--once');
   const cfgIdx = process.argv.indexOf('--config');
@@ -21,22 +19,30 @@ async function main() {
   const cfg = loadConfig(configPath);
 
   // 单实例：pid 文件里的进程还活着就直接退出，避免双击 vbs / 重复自启产生第二个 daemon
-  // 互相抢 git 锁。--once 调试模式不受此限。
-  if (!once) {
+  // 互相抢 git 锁；单次同步也遵守单实例限制。
+  {
     let oldPid = NaN;
+    let hadPidFile = false;
     try {
       oldPid = Number(readFileSync(PID_FILE, 'utf8').trim());
+      hadPidFile = true;
     } catch {
       // 没有 pid 文件：首次运行，或上次被强杀
     }
     if (oldPid !== process.pid && pidAlive(oldPid)) {
+      if (once) throw new Error('自动同步正在运行，请通过配置窗口的“立即同步”操作，避免同时操作仓库。');
       log(`VaultSync already running (pid ${oldPid}), exit`);
       return;
     }
-    writeFileSync(PID_FILE, String(process.pid));
+    if (hadPidFile) rmSync(PID_FILE, { force: true });
+    try { writeFileSync(PID_FILE, String(process.pid), { flag: 'wx' }); }
+    catch (e) {
+      if (e.code === 'EEXIST') throw new Error('另一个同步进程正在启动，请稍后重试。');
+      throw e;
+    }
     process.on('exit', () => {
       try {
-        rmSync(PID_FILE, { force: true });
+        if (Number(readFileSync(PID_FILE, 'utf8')) === process.pid) rmSync(PID_FILE, { force: true });
       } catch {
         // 清理失败无妨，下次启动按存活检查覆盖
       }
@@ -51,10 +57,15 @@ async function main() {
 
   // 任何 git 失败（网络等）只记录，不让进程退出，等下次触发再重试
   const safe = async (reason) => {
+    if (!once && existsSync(PAUSE_FILE)) return;
     try {
-      await syncOnce(reason);
+      const result = await syncOnce(reason);
+      writeFileSync(RESULT_FILE, JSON.stringify({ ok: true, vaultPath: cfg.vaultPath, time: new Date().toISOString(), ...result }));
     } catch (e) {
-      log(`Sync failed: ${gitErrorMessage(e)}`);
+      const error = gitErrorMessage(e);
+      writeFileSync(RESULT_FILE, JSON.stringify({ ok: false, vaultPath: cfg.vaultPath, time: new Date().toISOString(), error }));
+      log(`Sync failed: ${error}`);
+      if (once) process.exitCode = 1;
     }
   };
 
@@ -70,6 +81,20 @@ async function main() {
   log('Watcher active');
 
   const timer = setInterval(() => safe('periodic'), cfg.pollMs);
+  const manualTimer = setInterval(() => {
+    const stop = `${PID_FILE}.stop`;
+    if (existsSync(stop)) {
+      rmSync(stop, { force: true });
+      shutdown('configuration window');
+      return;
+    }
+    const request = `${PID_FILE}.sync`;
+    if (existsSync(request)) {
+      rmSync(request, { force: true });
+      safe('manual');
+    }
+  }, 1000);
+  manualTimer.unref();
   timer.unref(); // watcher 关闭后不被空 timer 拖住
 
   let closing = false;
@@ -78,9 +103,10 @@ async function main() {
     closing = true;
     log(`Received ${name}, shutting down`);
     clearInterval(timer);
+    clearInterval(manualTimer);
     await watcher.close();
     // 等在途的 git 流程跑完再退出，避免打断 rebase/commit 留下脏状态
-    await Promise.race([idle(), sleep(10_000)]);
+    await idle();
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

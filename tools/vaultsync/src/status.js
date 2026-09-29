@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { TOOL_DIR, PID_FILE, loadConfig } from './config.js';
+import { TOOL_DIR, PID_FILE, PAUSE_FILE, RESULT_FILE, loadConfig } from './config.js';
 import { findDaemon, formatAge, summarizeLog } from './status-lib.js';
 
 const LOG_FILE = path.join(TOOL_DIR, 'vaultsync.log');
@@ -12,6 +12,11 @@ async function main() {
 
   const daemon = await findDaemon(PID_FILE);
   const running = daemon.pids.length > 0;
+  if (existsSync(PAUSE_FILE)) console.log('  自动同步:  已暂停，恢复: npm run resume');
+  try {
+    const result = JSON.parse(readFileSync(RESULT_FILE, 'utf8'));
+    console.log(`  同步验证:  ${result.ok ? '成功' : '失败'} (${result.time})${result.error ? ': ' + result.error : ''}`);
+  } catch { console.log('  同步验证:  尚无结果'); }
   if (running) {
     const via = daemon.via === 'wmi' ? '，按命令行匹配（旧版 daemon，下次重启电脑后启用 pid 检测）' : '';
     console.log(`  daemon:    运行中 (pid ${daemon.pids.join(', ')}${via})`);

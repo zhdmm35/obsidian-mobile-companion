@@ -23,7 +23,7 @@ export function makeRunner(cwd) {
       maxBuffer: 16 * 1024 * 1024,
       timeout: GIT_TIMEOUT_MS,
       // 凭据失效时报错而非交互式询问——daemon 无人应答，询问等于挂死
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'false', GCM_GUI_PROMPT: 'false' },
     });
 }
 
@@ -68,8 +68,9 @@ export function createSync({ vaultPath, log = () => {}, runGit = makeRunner(vaul
       );
     }
 
-    const branch = (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
-    if (branch === 'HEAD') {
+    let branch;
+    try { branch = (await runGit(['symbolic-ref', '--short', 'HEAD'])).stdout.trim(); }
+    catch {
       throw new SyncError('detached', 'detached HEAD，跳过同步');
     }
 

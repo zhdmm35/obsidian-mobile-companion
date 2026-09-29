@@ -16,3 +16,7 @@ tools/vaultsync/node_modules/
 /tools/vaultsync/vaultsync.config.json
 /tools/vaultsync/vaultsync.log
 /tools/vaultsync/vaultsync.pid
+/tools/vaultsync/vaultsync.pid.*
+/tools/vaultsync/vaultsync.paused
+/tools/vaultsync/vaultsync.result.json
+/tools/vaultsync/dist/

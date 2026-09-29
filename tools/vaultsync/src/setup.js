@@ -5,7 +5,8 @@ import readline from 'node:readline/promises';
 import { promisify } from 'node:util';
 
 import { TOOL_DIR, PID_FILE, loadConfig } from './config.js';
-import { renderConfig, renderVbs, startupVbsPath, validateVault } from './setup-lib.js';
+import { renderVbs, startupVbsPath } from './setup-lib.js';
+import { saveVault } from './onboarding.js';
 import { findDaemon } from './status-lib.js';
 
 const pExecFile = promisify(execFile);
@@ -73,7 +74,7 @@ async function main() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
     banner('配置');
-    if (existsSync(CONFIG_FILE)) {
+    if (existsSync(CONFIG_FILE) && !process.argv.includes('--reconfigure')) {
       const cfg = loadConfig(); // 顺带校验；无效则抛错提示手动修复
       console.log(`  已有配置: ${path.basename(CONFIG_FILE)}`);
       console.log(`  Vault: ${cfg.vaultPath}（debounce ${cfg.debounceSeconds}s, poll ${cfg.pollMinutes}min）`);
@@ -86,8 +87,17 @@ async function main() {
         }
         const vaultPath = path.resolve(input.replace(/^"|"$/g, '')); // 拖入终端的路径常带引号
         try {
-          await validateVault(vaultPath);
-          writeFileSync(CONFIG_FILE, renderConfig(vaultPath));
+          if ((await findDaemon(PID_FILE)).pids.length) throw new Error('请先运行 npm run stop 退出后台同步，再修改配置。');
+          let repository = '';
+          let mode = 'existing';
+          if (!existsSync(path.join(vaultPath, '.git'))) {
+            mode = (await rl.question('  从 GitHub 下载已有笔记到空文件夹？[y/N]: ')).trim().toLowerCase() === 'y' ? 'download' : 'existing';
+            repository = (await rl.question('  GitHub 仓库地址（https://github.com/用户名/仓库名）: ')).trim();
+          }
+          const name = (await rl.question('  提交者姓名（已有 Git 配置可留空）: ')).trim();
+          const email = (await rl.question('  提交者邮箱（已有 Git 配置可留空）: ')).trim();
+          const summary = await saveVault(CONFIG_FILE, { vaultPath, repository, mode, name, email });
+          console.log(`  目标仓库: ${summary.repository}，分支: ${summary.branch}`);
           console.log(`  已写入 ${path.basename(CONFIG_FILE)}（debounce 30s, poll 5min，可手改）`);
           break;
         } catch (e) {
@@ -99,12 +109,9 @@ async function main() {
     if (process.platform === 'win32') {
       banner('开机自启');
       const vbsTarget = startupVbsPath();
-      writeFileSync(vbsTarget, renderVbs(PS1_FILE));
+      writeFileSync(vbsTarget, '\ufeff' + renderVbs(PS1_FILE), 'utf16le');
       console.log(`  已写入「启动」文件夹: ${vbsTarget}`);
       console.log('  每次登录 Windows 后 daemon 无窗口自动启动。');
-      if (/[^\x20-\x7E]/.test(PS1_FILE)) {
-        console.log('  ⚠ vaultsync 路径含非 ASCII 字符，若自启失效请移到纯 ASCII 路径后重新运行 setup');
-      }
 
       banner('启动');
       const daemon = await findDaemon(PID_FILE);
@@ -125,6 +132,13 @@ async function main() {
         } else {
           console.log('  已跳过。手动启动: wscript start-vaultsync.vbs');
         }
+      }
+      if ((await findDaemon(PID_FILE)).pids.length > 0) {
+        console.log('  验证同步（会提交并推送此目录内未被 Git 忽略的文件）...');
+        const { stdout } = await pExecFile(process.execPath, [path.join(TOOL_DIR, 'src/manage.js'), 'sync'], { timeout: 1200000, windowsHide: true });
+        const checked = JSON.parse(stdout);
+        if (!checked.ok || !checked.data.result?.ok) throw new Error(checked.error || checked.data.result?.error || '同步尚未成功');
+        console.log('  ✓ 同步成功');
       }
     } else {
       banner('开机自启');
