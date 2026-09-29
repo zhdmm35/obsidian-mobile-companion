@@ -1,5 +1,6 @@
 package com.obsidiancompanion.feature.capture
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -37,7 +38,9 @@ import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppIconButton
+import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.core.ui.PrimaryButton
+import com.obsidiancompanion.data.capture.CaptureDraftStore
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.feature.files.createWriteErrorMessage
 import com.obsidiancompanion.feature.files.isWindowsHostileSegment
@@ -101,26 +104,86 @@ fun sanitizeCaptureFolder(raw: String): String? {
     return segments.joinToString("/") { it.trim() }
 }
 
-/** 快速收集（系统分享 → 新笔记）：预览 + 可改名/目录 + 保存。暂存文本在进入时消费（见 init）。 */
+/**
+ * 快速收集（系统分享 → 新笔记）：预览 + 可改名/目录 + 保存。
+ * 收到分享即落盘本机草稿（CaptureDraftStore，改名/目录修改同步更新）：
+ * 离线可退出（联网后从首页「继续收集」接着上传），杀进程后仍在；上传成功才清草稿。
+ */
 class QuickCaptureViewModel : ViewModel() {
 
-    /** 进入时快照分享文本。 */
-    var sharedText by mutableStateOf(AppGraph.pendingSharedText.value.orEmpty())
+    /** 进入时恢复草稿；有不同的新分享时，确认后才替换。 */
+    var sharedText by mutableStateOf("")
+        private set
+    var nameField by mutableStateOf(TextFieldValue(""))
+        private set
+    var folderField by mutableStateOf(TextFieldValue(""))
+        private set
+    var replacementText by mutableStateOf<String?>(null)
         private set
 
-    // 预填标题光标置尾：用户直接打字是追加，而不是插到标题前面
-    var nameField by mutableStateOf(
-        defaultCaptureTitle(AppGraph.pendingSharedText.value.orEmpty())
-            .let { TextFieldValue(it, TextRange(it.length)) },
-    )
-    var folderField by mutableStateOf(TextFieldValue(""))
-
     init {
-        // 快照后立即消费暂存：系统返回/手势退出不会再被导航层重新弹出本页；
-        // 本页打开期间收到的新分享留在暂存里，退出回到 tab 后由导航层接着打开。
-        // （放在 VM init —— VM 随返回栈条目存活，旋转重建不会重复消费。）
-        AppGraph.pendingSharedText.value = null
+        val incoming = AppGraph.pendingSharedText.value
+        val saved = AppGraph.captureDraft.draft.value
+        saved?.let(::restore)
+        if (incoming != null) {
+            // 快照后立即消费暂存：系统返回/手势退出不会再被导航层重新弹出本页；
+            // 本页打开期间收到的新分享留在暂存里，退出回到 tab 后由导航层接着打开。
+            // （放在 VM init —— VM 随返回栈条目存活，旋转重建不会重复消费。）
+            AppGraph.pendingSharedText.value = null
+            if (saved == null) {
+                receive(incoming)
+            } else if (saved.text != incoming) {
+                replacementText = incoming
+            }
+        }
     }
+
+    fun replaceDraft() {
+        replacementText?.let(::receive)
+        replacementText = null
+    }
+
+    fun keepExistingDraft() {
+        replacementText = null
+    }
+
+    /** 新分享 → 立即落盘草稿（预填默认名，光标置尾）。 */
+    private fun receive(text: String) {
+        sharedText = text
+        val name = defaultCaptureTitle(text)
+        nameField = TextFieldValue(name, TextRange(name.length))
+        folderField = TextFieldValue("")
+        persistDraft()
+    }
+
+    private fun restore(draft: CaptureDraftStore.Draft) {
+        sharedText = draft.text
+        nameField = TextFieldValue(draft.name, TextRange(draft.name.length))
+        folderField = TextFieldValue(draft.folder)
+    }
+
+    /** 标题/目录修改即时同步草稿 —— 退出页面 / 杀进程后仍保留。 */
+    fun onNameChange(value: TextFieldValue) {
+        val changed = nameField.text != value.text
+        nameField = value
+        if (changed) persistDraft()
+    }
+
+    fun onFolderChange(value: TextFieldValue) {
+        val changed = folderField.text != value.text
+        folderField = value
+        if (changed) persistDraft()
+    }
+
+    private fun persistDraft() {
+        if (sharedText.isNotBlank()) {
+            AppGraph.captureDraft.save(sharedText, nameField.text, folderField.text)
+        }
+    }
+
+    /** 离线点击保存的提示（与错误语气区分）：内容已在本机，允许退出。 */
+    var offlineNotice by mutableStateOf<String?>(null)
+        private set
 
     var inFlight by mutableStateOf(false)
         private set
@@ -129,6 +192,8 @@ class QuickCaptureViewModel : ViewModel() {
 
     fun save(onSaved: (String) -> Unit) {
         if (inFlight) return
+        offlineNotice = null
+        saveError = null
         // 进程被杀后返回栈恢复时暂存已空 —— 不允许把空内容存成笔记
         if (sharedText.isBlank()) {
             saveError = "分享内容已失效，请重新分享"
@@ -145,32 +210,35 @@ class QuickCaptureViewModel : ViewModel() {
             return
         }
         if (!AppGraph.network.isOnline) {
-            saveError = "当前离线，无法保存，联网后再试"
+            // 草稿已落盘：离线不阻塞，允许退出，联网后从首页入口接着上传
+            offlineNotice = "当前离线 —— 内容已保存本机，联网后再点保存即可上传"
             return
         }
         val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
+        val uploadedDraft = CaptureDraftStore.Draft(sharedText, nameField.text, folderField.text)
         inFlight = true
-        saveError = null
         viewModelScope.launch {
-            when (val r = AppGraph.noteRepository.createNote(path, sharedText)) {
-                is NoteSaveResult.Saved -> {
-                    inFlight = false
-                    // 写操作后远端 Tree 必变：绕过 freshness window 强制补齐整树（如新目录的 DIRECTORY 行）
-                    AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
-                    onSaved(fileName)
+            try {
+                when (val r = AppGraph.noteRepository.createNote(path, uploadedDraft.text)) {
+                    is NoteSaveResult.Saved -> {
+                        AppGraph.captureDraft.clearIfUnchanged(uploadedDraft)
+                        // 写操作后远端 Tree 必变：绕过 freshness window 强制补齐整树（如新目录的 DIRECTORY 行）
+                        AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
+                        onSaved(fileName)
+                    }
+                    is NoteSaveResult.Conflict -> {
+                        saveError = "同名笔记已存在，换个名字或文件夹吧"
+                    }
+                    is NoteSaveResult.Error -> {
+                        saveError = createWriteErrorMessage(
+                            r.error,
+                            offline = "当前离线，内容已保存在本机，联网后再试",
+                            fallback = "保存失败，请稍后再试",
+                        )
+                    }
                 }
-                is NoteSaveResult.Conflict -> {
-                    inFlight = false
-                    saveError = "同名笔记已存在，换个名字或文件夹吧"
-                }
-                is NoteSaveResult.Error -> {
-                    inFlight = false
-                    saveError = createWriteErrorMessage(
-                        r.error,
-                        offline = "当前离线，无法保存，联网后再试",
-                        fallback = "保存失败，请稍后再试",
-                    )
-                }
+            } finally {
+                inFlight = false
             }
         }
     }
@@ -182,8 +250,22 @@ fun QuickCaptureScreen(
     onShowSnackbar: (String) -> Unit,
     viewModel: QuickCaptureViewModel = viewModel(),
 ) {
+    BackHandler(enabled = viewModel.inFlight) {
+        onShowSnackbar("正在保存，请稍候")
+    }
+    if (viewModel.replacementText != null) {
+        ConfirmationDialog(
+            title = "还有未上传的分享内容",
+            message = "替换会删除原来的本机草稿。要使用这次分享的新内容吗？",
+            confirmText = "替换旧草稿",
+            dismissText = "保留旧草稿",
+            onConfirm = viewModel::replaceDraft,
+            onDismiss = viewModel::keepExistingDraft,
+            onDismissRequest = {},
+        )
+    }
     Column(Modifier.fillMaxSize()) {
-        // 顶栏：返回（放弃本次收集；暂存文本进入时已消费，直接出栈即可）+ 标题
+        // 顶栏：返回后本机草稿仍保留，上传期间等待请求结束。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -191,10 +273,13 @@ fun QuickCaptureScreen(
                 .padding(start = 6.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 返回：内容已在本机草稿，退出不丢 —— 首页「继续收集」入口可接着处理
             AppIconButton(
                 icon = AppIcons.Back,
                 contentDescription = "返回",
-                onClick = onLeave,
+                onClick = {
+                    if (viewModel.inFlight) onShowSnackbar("正在保存，请稍候") else onLeave()
+                },
             )
             Text("保存分享内容", style = AppTypography.appBarTitle)
         }
@@ -231,7 +316,7 @@ fun QuickCaptureScreen(
             Text("笔记名", style = AppTypography.caption, color = AppColors.textTertiary)
             CaptureInput(
                 value = viewModel.nameField,
-                onValueChange = { viewModel.nameField = it },
+                onValueChange = viewModel::onNameChange,
                 placeholder = "笔记名（自动补 .md）",
                 enabled = !viewModel.inFlight,
             )
@@ -239,13 +324,16 @@ fun QuickCaptureScreen(
             Text("文件夹", style = AppTypography.caption, color = AppColors.textTertiary)
             CaptureInput(
                 value = viewModel.folderField,
-                onValueChange = { viewModel.folderField = it },
+                onValueChange = viewModel::onFolderChange,
                 placeholder = "留空保存在根目录，如 Inbox 或 收集/网页",
                 enabled = !viewModel.inFlight,
             )
 
             viewModel.saveError?.let {
                 Text(it, style = AppTypography.caption, color = AppColors.danger)
+            }
+            viewModel.offlineNotice?.let {
+                Text(it, style = AppTypography.caption, color = AppColors.textSecondary)
             }
 
             Spacer(Modifier.height(6.dp))

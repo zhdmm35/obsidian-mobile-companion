@@ -90,50 +90,61 @@ class OnboardingViewModel : ViewModel() {
         if (tokenError != null) tokenError = null
     }
 
-    /** 验证输入的 Token：保存 → GET /user → 成功加载仓库列表并回调导航。 */
+    /**
+     * 验证输入的 Token：GET /user 通过才正式替换已保存凭据并加载仓库列表。
+     * 候选 Token 仅用于本次验证请求，不替换全局凭据；失败或验证中断时旧登录保持不变。
+     */
     fun submitToken(onSuccess: () -> Unit) {
         val token = tokenInput.trim()
         if (token.isEmpty()) {
             tokenError = "请先输入 GitHub Token"
             return
         }
+        if (validating) return // 验证进行中：忽略重复提交
         validating = true
         tokenError = null
-        AppGraph.credentials.saveToken(token)
         viewModelScope.launch {
-            when (val r = AppGraph.githubRemote.validateToken()) {
-                is com.obsidiancompanion.data.github.GitHubResult.Ok -> {
-                    hasSavedToken = true
-                    loadRepos()
-                    validating = false
-                    onSuccess()
+            try {
+                when (val r = AppGraph.githubRemote.validateToken(token)) {
+                    is com.obsidiancompanion.data.github.GitHubResult.Ok -> {
+                        AppGraph.credentials.saveToken(token)
+                        hasSavedToken = true
+                        loadRepos()
+                        onSuccess()
+                    }
+                    is com.obsidiancompanion.data.github.GitHubResult.Fail -> {
+                        hasSavedToken = AppGraph.credentials.getToken() != null
+                        tokenError = r.error.tokenMessage()
+                    }
+                    is com.obsidiancompanion.data.github.GitHubResult.NotModified -> Unit
                 }
-                is com.obsidiancompanion.data.github.GitHubResult.Fail -> {
-                    AppGraph.credentials.clearToken()
-                    hasSavedToken = false
-                    validating = false
-                    tokenError = r.error.tokenMessage()
-                }
-                is com.obsidiancompanion.data.github.GitHubResult.NotModified -> validating = false
+            } finally {
+                validating = false
             }
         }
     }
 
     /** 使用已保存 Token 继续（重连场景，§67）。 */
     fun continueWithSavedToken(onSuccess: () -> Unit, onInvalid: (String) -> Unit) {
+        if (validating) return
         validating = true
+        tokenError = null
         viewModelScope.launch {
-            when (val r = AppGraph.githubRemote.validateToken()) {
-                is com.obsidiancompanion.data.github.GitHubResult.Ok -> {
-                    loadRepos()
-                    validating = false
-                    onSuccess()
+            try {
+                when (val r = AppGraph.githubRemote.validateToken()) {
+                    is com.obsidiancompanion.data.github.GitHubResult.Ok -> {
+                        loadRepos()
+                        onSuccess()
+                    }
+                    is com.obsidiancompanion.data.github.GitHubResult.Fail -> {
+                        val message = r.error.tokenMessage()
+                        tokenError = message
+                        onInvalid(message)
+                    }
+                    is com.obsidiancompanion.data.github.GitHubResult.NotModified -> Unit
                 }
-                is com.obsidiancompanion.data.github.GitHubResult.Fail -> {
-                    validating = false
-                    onInvalid(r.error.tokenMessage())
-                }
-                is com.obsidiancompanion.data.github.GitHubResult.NotModified -> validating = false
+            } finally {
+                validating = false
             }
         }
     }
@@ -305,6 +316,7 @@ fun OnboardingTokenScreen(
         BasicTextField(
             value = viewModel.tokenInput,
             onValueChange = viewModel::onTokenChange,
+            enabled = !viewModel.validating,
             visualTransformation = PasswordVisualTransformation(),
             textStyle = AppTypography.codeInline.copy(color = AppColors.textPrimary),
             cursorBrush = SolidColor(AppColors.accent),
@@ -340,13 +352,15 @@ fun OnboardingTokenScreen(
         PrimaryButton(
             text = if (viewModel.validating) "正在验证……" else "下一步",
             onClick = { viewModel.submitToken(onNext) },
+            enabled = !viewModel.validating, // 验证期间防重复提交
             block = true,
         )
         if (viewModel.hasSavedToken) {
             Spacer(Modifier.height(10.dp))
             GhostButton(
                 text = "使用已保存的 Token 继续",
-                onClick = { viewModel.continueWithSavedToken(onNext) { viewModel.onTokenChange("") } },
+                onClick = { viewModel.continueWithSavedToken(onNext) { } },
+                enabled = !viewModel.validating,
                 small = true,
             )
             Spacer(Modifier.height(6.dp))

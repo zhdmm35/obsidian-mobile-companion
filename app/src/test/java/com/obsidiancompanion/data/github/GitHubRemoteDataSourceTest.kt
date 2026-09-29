@@ -65,6 +65,42 @@ class GitHubRemoteDataSourceTest {
         assertEquals(GitHubResult.Fail(DomainError.Unauthorized, null), remote.validateToken())
     }
 
+    @Test
+    fun validateCandidateToken_keepsSavedTokenForOtherRequests() = runTest {
+        server.enqueue(json("""{"login":"candidate"}"""))
+        server.enqueue(json("[]"))
+        assertTrue(remote.validateToken("candidate_token") is GitHubResult.Ok)
+        assertEquals("Bearer candidate_token", server.takeRequest().getHeader("Authorization"))
+        remote.listRepositories()
+        assertEquals("Bearer gh_test_token", server.takeRequest().getHeader("Authorization"))
+        assertEquals("gh_test_token", token)
+    }
+
+    @Test
+    fun validateCandidateToken_failureKeepsSavedToken() = runTest {
+        server.enqueue(MockResponse().setResponseCode(401))
+        assertEquals(GitHubResult.Fail(DomainError.Unauthorized, 401), remote.validateToken("bad_token"))
+        assertEquals("Bearer bad_token", server.takeRequest().getHeader("Authorization"))
+        assertEquals("gh_test_token", token)
+    }
+
+    @Test
+    fun validateCandidateToken_blankDoesNotFallBackToSavedToken() = runTest {
+        assertEquals(GitHubResult.Fail(DomainError.Unauthorized), remote.validateToken(""))
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun runGuarded_preservesCancellation() = runTest {
+        val cancellation = kotlinx.coroutines.CancellationException("cancelled")
+        try {
+            runGuarded<Unit> { throw cancellation }
+            org.junit.Assert.fail("Expected CancellationException")
+        } catch (actual: kotlinx.coroutines.CancellationException) {
+            org.junit.Assert.assertSame(cancellation, actual)
+        }
+    }
+
     /* ── listRepositories ──────────────────────────────────── */
 
     @Test

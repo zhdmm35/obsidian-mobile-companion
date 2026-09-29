@@ -9,8 +9,8 @@ import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
-import retrofit2.http.Headers
 import retrofit2.http.Header
+import retrofit2.http.Headers
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -25,7 +25,7 @@ interface GitHubApi {
 
     @Headers("Accept: application/vnd.github+json")
     @GET("user")
-    suspend fun getUser(): Response<UserDto>
+    suspend fun getUser(@Header("Authorization") authorization: String? = null): Response<UserDto>
 
     @Headers("Accept: application/vnd.github+json")
     @GET("user/repos")
@@ -91,7 +91,9 @@ object GitHubApiFactory {
             .addInterceptor { chain ->
                 val builder = chain.request().newBuilder()
                     .header("X-GitHub-Api-Version", "2022-11-28")
-                tokenProvider()?.let { builder.header("Authorization", "Bearer $it") }
+                if (chain.request().header("Authorization") == null) {
+                    tokenProvider()?.let { builder.header("Authorization", "Bearer $it") }
+                }
                 chain.proceed(builder.build())
             }
             .connectTimeout(15, TimeUnit.SECONDS)

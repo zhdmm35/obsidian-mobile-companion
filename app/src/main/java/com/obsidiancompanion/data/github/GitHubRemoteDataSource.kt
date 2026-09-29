@@ -15,9 +15,9 @@ class GitHubRemoteDataSource(
     private val tokenProvider: () -> String? = { null },
 ) {
 
-    suspend fun validateToken(): GitHubResult<GithubUser> = runGuarded {
-        if (tokenProvider() == null) return@runGuarded GitHubResult.Fail(DomainError.Unauthorized)
-        val resp = api.getUser()
+    suspend fun validateToken(candidateToken: String? = tokenProvider()): GitHubResult<GithubUser> = runGuarded {
+        if (candidateToken.isNullOrBlank()) return@runGuarded GitHubResult.Fail(DomainError.Unauthorized)
+        val resp = api.getUser("Bearer $candidateToken")
         val body = resp.body()
         when {
             resp.isSuccessful && body != null -> GitHubResult.Ok(GithubUser(body.login))

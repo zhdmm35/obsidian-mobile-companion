@@ -172,6 +172,11 @@ class EditorViewModel : ViewModel() {
         viewModelScope.launch { AppGraph.noteRepository.clearPendingEdit(path) }
     }
 
+    /** 收起提示但保留草稿（点外部 / 系统返回）：下次进入仍会提示恢复。 */
+    fun keepDraft() {
+        pendingDraft = null
+    }
+
     /**
      * 保存（§6-§15）：
      * 成功 → onSaved（snackbar「已保存到 GitHub」+ 返回 Reader，Reader 经 Room 观察立即显示新内容）；
@@ -316,6 +321,7 @@ fun EditorScreen(
     }
 
     // §21：上次未保存的暂存恢复提示（写入失败 / 冲突 / 崩溃恢复）
+    // 点外部 / 系统返回只收起弹窗并保留草稿（下次进入仍会提示）；只有明确点「丢弃」才删除
     viewModel.pendingDraft?.let { draft ->
         ConfirmationDialog(
             title = "发现未保存的修改",
@@ -324,6 +330,7 @@ fun EditorScreen(
             dismissText = "丢弃",
             onConfirm = { viewModel.restoreDraft() },
             onDismiss = { viewModel.dismissDraft() },
+            onDismissRequest = { viewModel.keepDraft() },
         )
     }
 

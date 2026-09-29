@@ -1,6 +1,7 @@
 package com.obsidiancompanion.feature.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.obsidiancompanion.AppGraph
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -46,9 +48,12 @@ fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenFiles: () -> Unit,
     onOpenSync: () -> Unit,
+    onOpenCapture: () -> Unit,
     viewModel: HomeViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    // 待上传的分享收集草稿（离线保存 / 退出页面后从这里接着处理；上传成功自动消失）
+    val pendingCapture by AppGraph.captureDraft.draft.collectAsState()
 
     Column(
         modifier = Modifier
@@ -94,6 +99,39 @@ fun HomeScreen(
         ) {
             Icon(AppIcons.Search, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
             Text("搜索笔记……", style = AppTypography.bodyBase, color = AppColors.textMeta)
+        }
+
+        // 继续收集：上次未上传的分享草稿（点击回到快速收集页接着改名/上传）
+        pendingCapture?.let { draft ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = AppSpacing.screenPaddingHorizontal,
+                        end = AppSpacing.screenPaddingHorizontal,
+                        top = AppSpacing.xs,
+                    )
+                    .clip(AppShapes.medium)
+                    .background(AppColors.surface)
+                    .border(1.dp, AppColors.borderStrong, AppShapes.medium)
+                    .clickable(onClick = onOpenCapture)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(AppIcons.Share, contentDescription = null, tint = AppColors.accent, modifier = Modifier.size(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("继续处理分享内容", style = AppTypography.rowTitleSmall)
+                    Text(
+                        draft.name.ifBlank { "快速收集" },
+                        style = AppTypography.caption,
+                        color = AppColors.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
+            }
         }
 
         // 最近修改 = 检测到的远端变化（§22/§23：首次索引后为空是自然状态，不伪造数据）

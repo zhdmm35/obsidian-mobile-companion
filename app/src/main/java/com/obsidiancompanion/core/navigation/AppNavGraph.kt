@@ -208,6 +208,9 @@ fun AppNavGraph() {
                     onOpenSearch = { navigateToTab(Routes.SEARCH) },
                     onOpenFiles = { navigateToTab(Routes.FILES) },
                     onOpenSync = { navController.navigate(Routes.SYNC) },
+                    onOpenCapture = {
+                        navController.navigate(Routes.QUICK_CAPTURE) { launchSingleTop = true }
+                    },
                 )
             }
             composable(Routes.FILES) {

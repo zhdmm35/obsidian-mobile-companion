@@ -78,12 +78,14 @@ fun GhostButton(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     small: Boolean = false,
 ) {
     BaseButton(
         text = text,
         onClick = onClick,
         modifier = modifier,
+        enabled = enabled,
         small = small,
         block = false,
         container = Color.Transparent,

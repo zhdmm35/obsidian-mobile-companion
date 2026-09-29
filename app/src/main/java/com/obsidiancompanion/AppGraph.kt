@@ -77,6 +77,11 @@ object AppGraph {
      */
     val pendingSharedText = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
+    /** 分享收集本机草稿（单槽）：收到分享即落盘，上传成功清除 —— 见 QuickCaptureViewModel / CaptureDraftStore。 */
+    val captureDraft: com.obsidiancompanion.data.capture.CaptureDraftStore by lazy {
+        com.obsidiancompanion.data.capture.CaptureDraftStore(appContext!!)
+    }
+
     @Volatile
     private var appContext: Context? = null
 

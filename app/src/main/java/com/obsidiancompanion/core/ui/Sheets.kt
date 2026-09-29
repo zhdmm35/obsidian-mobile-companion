@@ -77,7 +77,11 @@ fun SheetActionRow(
     }
 }
 
-/** 二次确认对话框（放弃编辑更改 / 重新下载 Vault 等） */
+/**
+ * 二次确认对话框（放弃编辑更改 / 重新下载 Vault 等）。
+ * [onDismissRequest] 仅对应点外部 / 系统返回（默认与 [onDismiss] 同义）；
+ * 取消语义会销毁数据的场景（如草稿「丢弃」）应传入独立的 onDismissRequest 以保留数据。
+ */
 @Composable
 fun ConfirmationDialog(
     title: String,
@@ -86,9 +90,10 @@ fun ConfirmationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     dismissText: String = "取消",
+    onDismissRequest: (() -> Unit)? = null,
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = onDismissRequest ?: onDismiss,
         containerColor = AppColors.surface,
         shape = AppShapes.medium,
         title = { Text(title, style = AppTypography.bodyBase) },
