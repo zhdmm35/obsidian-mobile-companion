@@ -51,6 +51,7 @@ import com.obsidiancompanion.data.settings.AppSettings
 import com.obsidiancompanion.model.DomainError
 import com.obsidiancompanion.model.SyncStatus
 import com.obsidiancompanion.util.Format
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +78,9 @@ data class SyncUiState(
             isOffline -> SyncStatus.OFFLINE
             else -> SyncStatus.UPDATED
         }
+
+    val failure: RefreshOutcome.Failed?
+        get() = if (status == SyncStatus.REFRESH_FAILED) refresh.lastOutcome as? RefreshOutcome.Failed else null
 }
 
 /**
@@ -145,17 +149,18 @@ class SyncViewModel : ViewModel() {
         }
     }
 
+    private var refreshJob: Job? = null
+
     fun refreshNow(onMessage: (String) -> Unit) {
-        viewModelScope.launch {
+        // force=true 会绕过 freshness window；连点不能向 Mutex 排队多个手动请求。
+        if (refreshJob?.isActive == true || AppGraph.indexRepository.refreshUiState.value.refreshing) return
+        refreshJob = viewModelScope.launch {
             // 用户手动「立即刷新」：始终强制请求，不受 freshness window 去重（Phase 6B §5）
             when (val outcome = AppGraph.indexRepository.refreshTree(force = true)) {
                 is RefreshOutcome.Success ->
                     onMessage(if (outcome.diff.hasChanges) "已更新" else "已是最新")
                 is RefreshOutcome.NotModified -> onMessage("已是最新")
-                is RefreshOutcome.Failed -> onMessage(
-                    if (outcome.error == DomainError.NetworkUnavailable) "当前离线，联网后可刷新"
-                    else "刷新失败：${outcome.error.name}",
-                )
+                is RefreshOutcome.Failed -> onMessage(refreshFailureMessage(outcome.error))
             }
             refreshCacheStats()
         }
@@ -163,6 +168,24 @@ class SyncViewModel : ViewModel() {
 }
 
 data class TreeMeta(val branch: String?, val treeSha: String?, val markdownCount: Int, val lastRefreshAt: Long?)
+
+/**
+ * 刷新失败 → 中文原因（snackbar 与失败卡共用；不再向用户暴露 Forbidden 等错误名）。
+ * 鉴权错误可在失败卡提供「重新设置 Token」出口。
+ */
+internal fun refreshFailureMessage(error: DomainError): String = when (error) {
+    DomainError.Unauthorized -> "Token 无效或已过期，请重新设置 Token"
+    DomainError.Forbidden -> "Token 无权读取该仓库，请检查 Token 权限"
+    DomainError.NotFound -> "仓库不存在或已失去访问权限"
+    DomainError.RateLimited -> "GitHub 接口限流，请稍后再试"
+    DomainError.NetworkUnavailable -> "无法连接 GitHub，请检查网络后重试"
+    DomainError.ServerError -> "GitHub 服务暂时不可用，请稍后再试"
+    DomainError.MalformedResponse -> "GitHub 返回了无法解析的数据，请稍后再试"
+    else -> "刷新失败，请稍后再试"
+}
+
+private val DomainError.isAuthError: Boolean
+    get() = this == DomainError.Unauthorized || this == DomainError.Forbidden
 
 private data class HeroSpec(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -176,6 +199,7 @@ private data class HeroSpec(
 fun SyncScreen(
     onBack: () -> Unit,
     onOpenConflict: () -> Unit,
+    onOpenToken: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: SyncViewModel = viewModel(),
 ) {
@@ -199,7 +223,7 @@ fun SyncScreen(
         )
         SyncStatus.REFRESH_FAILED -> HeroSpec(
             AppIcons.Alert, "刷新失败",
-            "暂时无法刷新 GitHub。缓存内容仍可正常阅读", AppColors.danger, false,
+            "缓存内容仍可正常阅读，请按下方提示处理", AppColors.danger, false,
         )
         SyncStatus.CONFLICT -> HeroSpec(
             AppIcons.Alert, "有冲突",
@@ -257,6 +281,7 @@ fun SyncScreen(
         PrimaryButton(
             text = if (state.refresh.refreshing) "正在刷新…" else "立即刷新",
             onClick = { viewModel.refreshNow(onShowSnackbar) },
+            enabled = !state.refresh.refreshing,
             block = true,
             modifier = Modifier.padding(
                 start = AppSpacing.screenPaddingHorizontal,
@@ -264,6 +289,50 @@ fun SyncScreen(
                 top = 18.dp,
             ),
         )
+
+        // 刷新失败卡：中文原因 + 对应解决入口（鉴权错误可重设 Token；始终可重试）
+        state.failure?.let { failed ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = AppSpacing.screenPaddingHorizontal,
+                        end = AppSpacing.screenPaddingHorizontal,
+                        top = 16.dp,
+                    )
+                    .clip(AppShapes.small)
+                    .background(AppColors.surface)
+                    .border(1.dp, AppColors.border, AppShapes.small)
+                    .padding(16.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(AppIcons.Alert, contentDescription = null, tint = AppColors.danger, modifier = Modifier.size(16.dp))
+                    Text("刷新失败", style = AppTypography.titleSmall, color = AppColors.danger)
+                }
+                Text(
+                    refreshFailureMessage(failed.error),
+                    style = AppTypography.bodySmall,
+                    color = AppColors.textTertiary,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(14.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (failed.error.isAuthError) {
+                        PrimaryButton(text = "重新设置 Token", onClick = onOpenToken, small = true, block = true)
+                    }
+                    SecondaryButton(
+                        text = "重试",
+                        onClick = { viewModel.refreshNow(onShowSnackbar) },
+                        enabled = !state.refresh.refreshing,
+                        small = true,
+                        block = true,
+                    )
+                }
+            }
+        }
 
         // 冲突卡（仅 DEBUG 演示态；真实冲突 Phase 5 产生）
         if (ConflictDemo.enabled) {

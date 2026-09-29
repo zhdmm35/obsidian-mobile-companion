@@ -7,19 +7,23 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,17 +32,22 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.obsidiancompanion.AppGraph
 import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
+import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppTypography
+import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.DotsIndicator
 import com.obsidiancompanion.core.ui.GhostButton
 import com.obsidiancompanion.core.ui.PrimaryButton
+import com.obsidiancompanion.core.ui.SecondaryButton
 import com.obsidiancompanion.data.github.GithubRepo
 import com.obsidiancompanion.model.DomainError
 import kotlinx.coroutines.launch
@@ -290,15 +299,17 @@ fun OnboardingWelcomeScreen(
     }
 }
 
-/** Onboarding 2/6 —— GitHub Token（真实验证；文案按 Phase 1 修正 #1：Contents Read and write） */
+/** Onboarding 2/6 —— GitHub Token（真实验证；可显隐 Token、直达创建页 + 权限示例，降低上手门槛） */
 @Composable
 fun OnboardingTokenScreen(
     onNext: () -> Unit,
+    onOpenTokenPage: () -> Unit,
 ) {
     // Onboarding 三屏（Token/Repo/Confirm）共享 Activity 级 ViewModel，跨屏保留输入与选择
     val viewModel: OnboardingViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
         viewModelStoreOwner = androidx.compose.ui.platform.LocalContext.current as androidx.lifecycle.ViewModelStoreOwner,
     )
+    var showToken by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -317,25 +328,38 @@ fun OnboardingTokenScreen(
             value = viewModel.tokenInput,
             onValueChange = viewModel::onTokenChange,
             enabled = !viewModel.validating,
-            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            visualTransformation = if (showToken) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation()
+            },
             textStyle = AppTypography.codeInline.copy(color = AppColors.textPrimary),
             cursorBrush = SolidColor(AppColors.accent),
             singleLine = true,
             decorationBox = { inner ->
-                Box(
+                Row(
                     modifier = Modifier
                         .height(48.dp)
                         .clip(AppShapes.medium)
                         .background(AppColors.surface)
                         .border(1.dp, if (viewModel.tokenError == null) AppColors.borderStrong else AppColors.danger, AppShapes.medium),
-                    contentAlignment = Alignment.CenterStart,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.padding(horizontal = 14.dp)) {
+                    Box(Modifier.weight(1f).padding(start = 14.dp)) {
                         if (viewModel.tokenInput.isEmpty()) {
                             Text("github_pat_••••••••••••", style = AppTypography.codeInline, color = AppColors.textMeta)
                         }
                         inner()
                     }
+                    AppIconButton(
+                        icon = AppIcons.Eye,
+                        contentDescription = if (showToken) "隐藏 Token" else "显示 Token",
+                        onClick = { showToken = !showToken },
+                        tint = if (showToken) AppColors.accent else AppColors.textMeta,
+                        iconSize = 18.dp,
+                    )
                 }
             },
         )
@@ -374,11 +398,39 @@ fun OnboardingTokenScreen(
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            "1. 打开 GitHub → Settings → Developer settings → Fine-grained tokens\n" +
-                "2. Repository access 只选择你的 Vault 仓库\n" +
-                "3. Permissions 中把 Contents 设为 Read and write",
+            "1. 点下方按钮打开 GitHub，登录后填写 Token name 和 Expiration\n" +
+                "2. Resource owner 选择你的 Vault 所属账号或组织\n" +
+                "3. Repository access 选 Only select repositories，再选你的 Vault 仓库\n" +
+                "4. Permissions 中把 Contents 设为 Read and write\n" +
+                "5. 点 Generate token，复制生成的 Token，回到这里粘贴并点「下一步」",
             style = AppTypography.caption,
             color = AppColors.textTertiary,
+        )
+        Spacer(Modifier.height(10.dp))
+        // 权限配置示例：照着这两项勾选即可（页面默认可能未配置 Contents 写权限）
+        Text(
+            buildString {
+                appendLine("Repository access（仓库访问）")
+                appendLine("Only select repositories → 选择你的 Vault")
+                appendLine()
+                appendLine("Repository permissions（仓库权限）")
+                append("Contents → Read and write")
+            },
+            style = AppTypography.bodySmall,
+            color = AppColors.textTertiary,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(AppShapes.medium)
+                .background(AppColors.surface)
+                .border(1.dp, AppColors.border, AppShapes.medium)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        )
+        Spacer(Modifier.height(12.dp))
+        SecondaryButton(
+            text = "打开 GitHub Token 创建页面",
+            onClick = onOpenTokenPage,
+            block = true,
+            small = true,
         )
         Spacer(Modifier.height(28.dp))
         DotsIndicator(count = 5, current = 1)

@@ -60,11 +60,13 @@ fun SecondaryButton(
     modifier: Modifier = Modifier,
     small: Boolean = false,
     block: Boolean = false,
+    enabled: Boolean = true,
 ) {
     BaseButton(
         text = text,
         onClick = onClick,
         modifier = modifier,
+        enabled = enabled,
         small = small,
         block = block,
         container = AppColors.surfaceWarm,

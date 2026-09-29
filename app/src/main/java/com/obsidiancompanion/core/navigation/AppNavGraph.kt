@@ -176,6 +176,19 @@ fun AppNavGraph() {
                             navController.navigate(Routes.ONBOARDING_REPO)
                         }
                     },
+                    onOpenTokenPage = {
+                        // 直达 fine-grained token 创建页（引导里已给权限示例）
+                        try {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://github.com/settings/personal-access-tokens/new"),
+                                ),
+                            )
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            showSnackbar("设备上没有可打开该链接的应用")
+                        }
+                    },
                 )
             }
             composable(Routes.ONBOARDING_REPO) {
@@ -324,6 +337,7 @@ fun AppNavGraph() {
                 SyncScreen(
                     onBack = { navController.popBackStack() },
                     onOpenConflict = { navController.navigate(Routes.CONFLICT_DEMO) },
+                    onOpenToken = { navController.navigate(Routes.onboardingToken(reentry = true)) },
                     onShowSnackbar = ::showSnackbar,
                 )
             }

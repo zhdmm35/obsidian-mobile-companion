@@ -192,7 +192,7 @@ fun SettingsScreen(
         }
 
         Text(
-            "Obsidian Mobile Companion · Version 1.0",
+            "Obsidian Mobile Companion · Version ${BuildConfig.VERSION_NAME}",
             style = AppTypography.caption,
             color = AppColors.textMeta,
             modifier = Modifier
