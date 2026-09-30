@@ -30,7 +30,8 @@ class MainActivity : ComponentActivity() {
     private fun handleShareIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: return
-            AppGraph.pendingSharedText.value = text
+            val draft = AppGraph.captureDraft.create(text, com.obsidiancompanion.feature.capture.defaultCaptureTitle(text))
+            AppGraph.pendingCaptureId.value = draft.id
             intent.removeExtra(Intent.EXTRA_TEXT) // 防旋转重建时重复入队
         }
     }

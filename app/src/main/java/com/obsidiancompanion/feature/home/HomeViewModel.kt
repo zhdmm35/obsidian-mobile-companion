@@ -47,6 +47,12 @@ data class HomeUiState(
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel : ViewModel() {
 
+    val draftCount = combine(
+        AppGraph.database.pendingEditDao().observeAll(),
+        AppGraph.captureDraft.drafts,
+    ) { edits, shares -> edits.size + shares.size }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
     private val settings = AppGraph.settings
     private val index = AppGraph.indexRepository
     private val network = AppGraph.network

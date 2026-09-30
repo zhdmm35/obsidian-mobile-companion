@@ -8,6 +8,7 @@ import com.obsidiancompanion.data.metadata.entities.NoteUserMetadataEntity
 import com.obsidiancompanion.data.metadata.entities.RecentSearchEntity
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.data.metadata.entities.EntryKind
+import com.obsidiancompanion.data.metadata.entities.PendingEditEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -154,6 +155,22 @@ class MetadataDaoTest {
         dao.record("repoA", "Spring", 100L)
         dao.record("repoB", "Spring", 100L)
         assertEquals(1, dao.observeRecent("repoA", 10).first().size)
+    }
+
+    @Test
+    fun draftsObserveAllReposOrderedByTime_andDeleteOnlyExactSnapshot() = runTest {
+        val dao = db.pendingEditDao()
+        val older = PendingEditEntity("repoA", "A.md", "sha1", "old", 100L)
+        val newer = PendingEditEntity("repoB", "A.md", "sha2", "other repo", 200L)
+        dao.upsert(older)
+        dao.upsert(newer)
+        assertEquals(listOf(newer, older), dao.observeAll().first())
+        val changed = older.copy(content = "modified", updatedAt = 300L)
+        dao.upsert(changed)
+        assertEquals(0, dao.deleteIfUnchanged(older.repoId, older.path, older.baseSha, older.content, older.updatedAt))
+        assertEquals(changed, dao.get(older.repoId, older.path))
+        assertEquals(1, dao.deleteIfUnchanged(changed.repoId, changed.path, changed.baseSha, changed.content, changed.updatedAt))
+        assertEquals(listOf(newer), dao.observeAll().first())
     }
 
     private fun entry(repoId: String, path: String, sha: String, kind: EntryKind = EntryKind.MARKDOWN) =

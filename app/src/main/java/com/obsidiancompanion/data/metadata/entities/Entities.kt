@@ -58,8 +58,8 @@ data class RepositoryStateEntity(
 
 /**
  * Phase 5 §20-§21：发送 GitHub Write 前暂存的待保存内容（最低限度 Draft）。
- * 用途仅限：写入失败 / 冲突 / 保存过程中 App 异常退出；保存成功立即清除。
- * 无 history、无多版本、无管理页、不按按键自动保存。
+ * 编辑停笔后自动暂存；可从草稿中心继续编辑、复制或明确丢弃，保存成功清除。
+ * 每个仓库路径保留一份草稿；撤销历史仅在当前编辑会话内存中。
  */
 @Entity(tableName = "pending_edits", primaryKeys = ["repoId", "path"])
 data class PendingEditEntity(

@@ -9,37 +9,62 @@ import org.junit.Test
 
 class CaptureDraftStoreTest {
     @Test
-    fun savedDraft_restoresTextNameAndFolderFromPreferences() {
+    fun savedDraft_restoresTextNameFolderAndStableIdentity() {
         val prefs = MemoryPreferences()
-        CaptureDraftStore(prefs).save("分享正文", "修改后的名字", "收集/网页")
-        assertEquals(
-            CaptureDraftStore.Draft("分享正文", "修改后的名字", "收集/网页"),
-            CaptureDraftStore(prefs).draft.value,
-        )
+        val saved = CaptureDraftStore(prefs).create("分享正文", "修改后的名字", "收集/网页")
+        assertEquals(listOf(saved), CaptureDraftStore(prefs).drafts.value)
     }
 
     @Test
-    fun successfulUpload_clearsMatchingDraftAndPersistedCopy() {
+    fun multipleShares_doNotOverwriteEvenWithIdenticalText() {
         val prefs = MemoryPreferences()
         val store = CaptureDraftStore(prefs)
-        store.save("分享正文", "笔记", "Inbox")
-        assertTrue(store.clearIfUnchanged(store.draft.value!!))
-        assertNull(store.draft.value)
-        assertNull(CaptureDraftStore(prefs).draft.value)
+        val first = store.create("正文", "笔记", "")
+        val second = store.create("正文", "笔记", "Inbox")
+        assertFalse(first.id == second.id)
+        assertEquals(listOf(second, first), CaptureDraftStore(prefs).drafts.value)
     }
 
     @Test
-    fun completingOlderUpload_doesNotDeleteNewerDraft() {
+    fun successfulUpload_onlyClearsItsOwnUnchangedDraft() {
         val prefs = MemoryPreferences()
         val store = CaptureDraftStore(prefs)
-        store.save("旧内容", "旧笔记", "")
-        val uploaded = store.draft.value!!
-        store.save("新内容", "新笔记", "Inbox")
+        val uploaded = store.create("正文", "笔记", "")
+        val other = store.create("其他", "其他笔记", "Inbox")
+        assertTrue(store.clearIfUnchanged(uploaded))
+        assertEquals(listOf(other), CaptureDraftStore(prefs).drafts.value)
+    }
+
+    @Test
+    fun completingOlderUpload_doesNotDeleteModifiedDraft() {
+        val prefs = MemoryPreferences()
+        val store = CaptureDraftStore(prefs)
+        val uploaded = store.create("正文", "旧名字", "")
+        val changed = store.update(uploaded.id, "新名字", "Inbox")
         assertFalse(store.clearIfUnchanged(uploaded))
-        assertEquals(
-            CaptureDraftStore.Draft("新内容", "新笔记", "Inbox"),
-            CaptureDraftStore(prefs).draft.value,
-        )
+        assertEquals(changed, CaptureDraftStore(prefs).find(uploaded.id))
+    }
+
+    @Test
+    fun editingDeletedDraft_doesNotResurrectIt() {
+        val prefs = MemoryPreferences()
+        val store = CaptureDraftStore(prefs)
+        val draft = store.create("正文", "笔记", "")
+        assertTrue(store.clearIfUnchanged(draft))
+        assertNull(store.update(draft.id, "新名字", ""))
+        assertTrue(CaptureDraftStore(prefs).drafts.value.isEmpty())
+    }
+
+    @Test
+    fun legacySingleDraft_migratesOnceWithoutLosingContent() {
+        val prefs = MemoryPreferences()
+        prefs.edit().putString("text", "旧分享正文").putString("name", "旧名字").putString("folder", "Inbox").commit()
+        val migrated = CaptureDraftStore(prefs).drafts.value.single()
+        assertEquals("旧分享正文", migrated.text)
+        assertEquals("旧名字", migrated.name)
+        assertEquals("Inbox", migrated.folder)
+        assertFalse(prefs.contains("text"))
+        assertEquals(migrated, CaptureDraftStore(prefs).drafts.value.single())
     }
 
     /** 只模拟草稿存储使用的字符串接口；不依赖 Android 运行时。 */

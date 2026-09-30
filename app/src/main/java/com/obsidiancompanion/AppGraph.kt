@@ -72,12 +72,12 @@ object AppGraph {
     }
 
     /**
-     * 系统分享进来的文本（ACTION_SEND）：MainActivity 写入，AppNavGraph 观察并打开快速收集页。
+     * 系统分享草稿 ID（ACTION_SEND，正文已持久化）：MainActivity 写入，AppNavGraph 观察并打开快速收集页。
      * StateFlow 暂存 —— App 冷启动时导航尚未就绪也不丢。
      */
-    val pendingSharedText = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val pendingCaptureId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
-    /** 分享收集本机草稿（单槽）：收到分享即落盘，上传成功清除 —— 见 QuickCaptureViewModel / CaptureDraftStore。 */
+    /** 分享收集本机草稿（多条）：收到分享即落盘，上传成功清除 —— 见 QuickCaptureViewModel / CaptureDraftStore。 */
     val captureDraft: com.obsidiancompanion.data.capture.CaptureDraftStore by lazy {
         com.obsidiancompanion.data.capture.CaptureDraftStore(appContext!!)
     }

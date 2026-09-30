@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -38,14 +39,13 @@ import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppIconButton
-import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.core.ui.PrimaryButton
-import com.obsidiancompanion.data.capture.CaptureDraftStore
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.feature.files.createWriteErrorMessage
 import com.obsidiancompanion.feature.files.isWindowsHostileSegment
 import com.obsidiancompanion.feature.files.sanitizeNoteName
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 /** 分享内容预览的最大字符数（超出显示省略号；保存不受此限）。 */
 private const val PREVIEW_MAX_CHARS = 4000
@@ -107,78 +107,44 @@ fun sanitizeCaptureFolder(raw: String): String? {
 /**
  * 快速收集（系统分享 → 新笔记）：预览 + 可改名/目录 + 保存。
  * 收到分享即落盘本机草稿（CaptureDraftStore，改名/目录修改同步更新）：
- * 离线可退出（联网后从首页「继续收集」接着上传），杀进程后仍在；上传成功才清草稿。
+ * 离线可退出（联网后从首页「草稿中心」接着上传），杀进程后仍在；上传成功才清草稿。
  */
-class QuickCaptureViewModel : ViewModel() {
-
-    /** 进入时恢复草稿；有不同的新分享时，确认后才替换。 */
+class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
+    private val draftId: String? = savedStateHandle["draftId"]
     var sharedText by mutableStateOf("")
         private set
     var nameField by mutableStateOf(TextFieldValue(""))
         private set
     var folderField by mutableStateOf(TextFieldValue(""))
         private set
-    var replacementText by mutableStateOf<String?>(null)
+    var targetRepo by mutableStateOf<String?>(null)
         private set
 
     init {
-        val incoming = AppGraph.pendingSharedText.value
-        val saved = AppGraph.captureDraft.draft.value
-        saved?.let(::restore)
-        if (incoming != null) {
-            // 快照后立即消费暂存：系统返回/手势退出不会再被导航层重新弹出本页；
-            // 本页打开期间收到的新分享留在暂存里，退出回到 tab 后由导航层接着打开。
-            // （放在 VM init —— VM 随返回栈条目存活，旋转重建不会重复消费。）
-            AppGraph.pendingSharedText.value = null
-            if (saved == null) {
-                receive(incoming)
-            } else if (saved.text != incoming) {
-                replacementText = incoming
-            }
+        draftId?.let(AppGraph.captureDraft::find)?.let { draft ->
+            sharedText = draft.text
+            nameField = TextFieldValue(draft.name, TextRange(draft.name.length))
+            folderField = TextFieldValue(draft.folder)
         }
+        viewModelScope.launch { targetRepo = AppGraph.settings.flow.first().repoId }
     }
 
-    fun replaceDraft() {
-        replacementText?.let(::receive)
-        replacementText = null
-    }
-
-    fun keepExistingDraft() {
-        replacementText = null
-    }
-
-    /** 新分享 → 立即落盘草稿（预填默认名，光标置尾）。 */
-    private fun receive(text: String) {
-        sharedText = text
-        val name = defaultCaptureTitle(text)
-        nameField = TextFieldValue(name, TextRange(name.length))
-        folderField = TextFieldValue("")
-        persistDraft()
-    }
-
-    private fun restore(draft: CaptureDraftStore.Draft) {
-        sharedText = draft.text
-        nameField = TextFieldValue(draft.name, TextRange(draft.name.length))
-        folderField = TextFieldValue(draft.folder)
-    }
-
-    /** 标题/目录修改即时同步草稿 —— 退出页面 / 杀进程后仍保留。 */
     fun onNameChange(value: TextFieldValue) {
+        if (inFlight) return
         val changed = nameField.text != value.text
         nameField = value
         if (changed) persistDraft()
     }
 
     fun onFolderChange(value: TextFieldValue) {
+        if (inFlight) return
         val changed = folderField.text != value.text
         folderField = value
         if (changed) persistDraft()
     }
 
     private fun persistDraft() {
-        if (sharedText.isNotBlank()) {
-            AppGraph.captureDraft.save(sharedText, nameField.text, folderField.text)
-        }
+        draftId?.let { AppGraph.captureDraft.update(it, nameField.text, folderField.text) }
     }
 
     /** 离线点击保存的提示（与错误语气区分）：内容已在本机，允许退出。 */
@@ -215,7 +181,15 @@ class QuickCaptureViewModel : ViewModel() {
             return
         }
         val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
-        val uploadedDraft = CaptureDraftStore.Draft(sharedText, nameField.text, folderField.text)
+        val uploadedDraft = draftId?.let(AppGraph.captureDraft::find)
+        if (uploadedDraft == null) {
+            saveError = "这条草稿已被删除，请返回草稿中心"
+            return
+        }
+        if (targetRepo == null) {
+            saveError = "请先连接 GitHub 仓库"
+            return
+        }
         inFlight = true
         viewModelScope.launch {
             try {
@@ -253,17 +227,6 @@ fun QuickCaptureScreen(
     BackHandler(enabled = viewModel.inFlight) {
         onShowSnackbar("正在保存，请稍候")
     }
-    if (viewModel.replacementText != null) {
-        ConfirmationDialog(
-            title = "还有未上传的分享内容",
-            message = "替换会删除原来的本机草稿。要使用这次分享的新内容吗？",
-            confirmText = "替换旧草稿",
-            dismissText = "保留旧草稿",
-            onConfirm = viewModel::replaceDraft,
-            onDismiss = viewModel::keepExistingDraft,
-            onDismissRequest = {},
-        )
-    }
     Column(Modifier.fillMaxSize()) {
         // 顶栏：返回后本机草稿仍保留，上传期间等待请求结束。
         Row(
@@ -273,7 +236,7 @@ fun QuickCaptureScreen(
                 .padding(start = 6.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 返回：内容已在本机草稿，退出不丢 —— 首页「继续收集」入口可接着处理
+            // 返回：内容已在本机草稿，退出不丢 —— 首页「草稿中心」入口可接着处理
             AppIconButton(
                 icon = AppIcons.Back,
                 contentDescription = "返回",
@@ -292,6 +255,8 @@ fun QuickCaptureScreen(
                 .padding(bottom = AppSpacing.screenBottomPadding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Text("上传到：${viewModel.targetRepo ?: "正在读取仓库配置…"}", style = AppTypography.caption, color = AppColors.textTertiary)
+            Text("返回后草稿仍保留，可从首页草稿中心继续处理", style = AppTypography.caption, color = AppColors.textTertiary)
             // 分享内容预览（只读）
             Text("内容", style = AppTypography.caption, color = AppColors.textTertiary)
             Box(

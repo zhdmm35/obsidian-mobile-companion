@@ -25,7 +25,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.obsidiancompanion.AppGraph
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -48,12 +47,12 @@ fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenFiles: () -> Unit,
     onOpenSync: () -> Unit,
-    onOpenCapture: () -> Unit,
+    onOpenDrafts: () -> Unit,
     viewModel: HomeViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
-    // 待上传的分享收集草稿（离线保存 / 退出页面后从这里接着处理；上传成功自动消失）
-    val pendingCapture by AppGraph.captureDraft.draft.collectAsState()
+    // 所有仓库的编辑草稿与分享草稿总数。
+    val draftCount by viewModel.draftCount.collectAsState()
 
     Column(
         modifier = Modifier
@@ -101,8 +100,8 @@ fun HomeScreen(
             Text("搜索笔记……", style = AppTypography.bodyBase, color = AppColors.textMeta)
         }
 
-        // 继续收集：上次未上传的分享草稿（点击回到快速收集页接着改名/上传）
-        pendingCapture?.let { draft ->
+        // 草稿中心入口始终可见，方便新用户发现本机暂存内容。
+        run {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -114,16 +113,16 @@ fun HomeScreen(
                     .clip(AppShapes.medium)
                     .background(AppColors.surface)
                     .border(1.dp, AppColors.borderStrong, AppShapes.medium)
-                    .clickable(onClick = onOpenCapture)
+                    .clickable(onClick = onOpenDrafts)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Icon(AppIcons.Share, contentDescription = null, tint = AppColors.accent, modifier = Modifier.size(16.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("继续处理分享内容", style = AppTypography.rowTitleSmall)
+                    Text("草稿中心", style = AppTypography.rowTitleSmall)
                     Text(
-                        draft.name.ifBlank { "快速收集" },
+                        if (draftCount == 0) "编辑与分享草稿都在这里" else "$draftCount 条待处理草稿",
                         style = AppTypography.caption,
                         color = AppColors.textTertiary,
                         maxLines = 1,

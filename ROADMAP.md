@@ -1,22 +1,29 @@
 # Roadmap / 路线图
 
-This roadmap tracks maintainer work for the GitHub Markdown knowledge-base mobile workflow. Priorities may change when real users report problems.
+路线图围绕「首次配置成功 → 离线可用 → 编辑不误丢 → 同步可理解」推进。Android 与 Windows 工具独立发版；优先级根据可复现的问题调整。
 
-## v0.1.1 — release candidate
+## 已完成
 
-- Signed installable APK for real-device feedback.
-- CI for Android tests, debug APK builds, and `vaultsync` tests.
-- Issue templates, pull-request checks, security reporting, and a public maintenance workflow.
+- Windows VaultSync v0.2.0 正式版：图形配置、环境检查、完整便携包与复用本机 Node.js/Git 的轻量包。
+- Android v0.1.1 候选版：签名 APK、CI、新手 Token 引导、中文刷新错误与解决入口、分享内容本机保存。
+- Android v0.1.2 候选版：草稿中心、多条分享草稿及旧数据迁移、继续编辑/复制/确认丢弃、保留草稿并退出、会话内撤销/重做。
+- 已有阅读能力：常用 Markdown/Obsidian 语法、图片查看、收藏/最近阅读、文件夹离线下载与显式冲突处理。
 
-## Next feedback cycle
+## 下一轮：验证候选版的核心流程
 
-- Validate first-run setup with real GitHub repositories and fine-grained tokens.
-- Improve conflict review and offline recovery based on reproducible reports.
-- Expand Markdown and Obsidian syntax fixtures without importing private vault content.
-- Document battery, network, cache, and repository-size limits.
+1. **真实设备与升级**：验证 v0.1.1 覆盖安装、草稿迁移、中文输入法、离线恢复与双端冲突。以 [试用说明](BETA_TESTING.md) 为验证清单。
+2. **首次配置**：用真实 GitHub 仓库与 fine-grained Token 记录卡点，完善权限、仓库选择和失败后重试提示。
+3. **同步与冲突可理解性**：根据反馈改进差异阅读和操作文案，让用户清楚哪些内容仅在本机、哪些已上传。
+4. **性能与可访问性**：测量大仓库启动/搜索/缓存表现，检查字体放大、点击区域、TalkBack 与耗电/流量，再针对证据优化。
 
-## After the first stable cycle
+## 稳定版发布条件
 
-- Publish a stable signed release when installation, sync, and conflict flows have real-user evidence.
-- Add release notes with measured downloads, active testers, resolved issues, and security fixes.
-- Review accessibility, localization, and repository-scale performance.
+- 核心安装、读取、离线编辑、分享收集、保存与冲突流程通过真实设备验证。
+- 影响数据保留的高优先级问题已关闭，升级签名与数据迁移可重复验证。
+- 发布说明记录实际测试范围与已知限制，不将构建通过等同于真机验收。
+
+## 后续按需求评估
+
+- 更直观的冲突差异对比、离线资料管理与仓库规模性能优化。
+- 更简便的 GitHub 授权方案，需先验证权限、撤销授权与维护成本。
+- 草稿自动上传、多设备草稿同步与持久化撤销历史暂不列入本轮范围；当前草稿需手动保存。

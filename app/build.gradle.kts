@@ -27,8 +27,8 @@ android {
         applicationId = "com.obsidiancompanion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 默认正式 GitHub；本地 E2E 用 -PgithubApiBaseUrl=http://10.0.2.2:18080/ 覆盖
         buildConfigField(

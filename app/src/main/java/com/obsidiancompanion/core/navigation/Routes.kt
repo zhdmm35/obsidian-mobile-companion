@@ -21,7 +21,7 @@ object Routes {
 
     // ── Push 栈（无底栏）──────────────────────────────────────
     const val READER = "reader/{noteId}?anchor={anchor}"
-    const val EDITOR = "editor/{noteId}"
+    const val EDITOR = "editor/{noteId}?restoreDraft={restoreDraft}"
 
     /** 图片查看器（path = URL 编码的仓库相对路径，与 Reader 同一约定）。 */
     const val VIEWER = "viewer/{path}"
@@ -33,13 +33,17 @@ object Routes {
     const val CONFLICT_DEMO = "conflict"
     const val SYNC = "sync"
 
-    /** 快速收集（系统分享文本 → 新笔记；文本经 AppGraph.pendingSharedText 传递，不走 URL）。 */
-    const val QUICK_CAPTURE = "capture"
+    /** 草稿管理与快速收集；导航只传持久化草稿 ID，正文不走 URL。 */
+    const val DRAFTS = "drafts"
+    const val QUICK_CAPTURE = "capture?draftId={draftId}"
 
     fun reader(noteId: String, anchor: String? = null): String =
         if (anchor == null) "reader/$noteId" else "reader/$noteId?anchor=$anchor"
 
-    fun editor(noteId: String): String = "editor/$noteId"
+    fun editor(noteId: String, restoreDraft: Boolean = false): String =
+        "editor/$noteId?restoreDraft=$restoreDraft"
+
+    fun capture(draftId: String): String = "capture?draftId=$draftId"
 
     fun viewer(path: String): String = "viewer/$path"
 

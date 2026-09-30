@@ -71,6 +71,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 
 /**
@@ -85,6 +87,29 @@ class EditorViewModel : ViewModel() {
     enum class SaveState { EDITING, SAVING }
 
     var value by mutableStateOf(TextFieldValue(""))
+        private set
+    private val history = EditorHistory()
+    var canUndo by mutableStateOf(false)
+        private set
+    var canRedo by mutableStateOf(false)
+        private set
+
+    fun onValueChange(next: TextFieldValue) {
+        if (!loaded || saveState == SaveState.SAVING) return
+        if (next.text != value.text) draftStaged = false
+        history.record(next)
+        value = next
+        updateHistoryState()
+    }
+
+    fun undo() { if (loaded && saveState != SaveState.SAVING) { value = history.undo(); draftStaged = false; updateHistoryState() } }
+    fun redo() { if (loaded && saveState != SaveState.SAVING) { value = history.redo(); draftStaged = false; updateHistoryState() } }
+    private fun updateHistoryState() { canUndo = history.canUndo; canRedo = history.canRedo }
+    private fun resetText(text: String) {
+        value = TextFieldValue(text, TextRange(text.length))
+        history.reset(value)
+        updateHistoryState()
+    }
     var loadHint by mutableStateOf<String?>(null)
         private set
     var saveState by mutableStateOf(SaveState.EDITING)
@@ -95,7 +120,7 @@ class EditorViewModel : ViewModel() {
         private set
 
     /** 保存失败兜底（§23/§25/§26/§28）：对话框提供「复制全文」出口；auth=true 时附加「重新设置 Token」。 */
-    data class SaveFailure(val message: String, val auth: Boolean = false)
+    data class SaveFailure(val message: String, val auth: Boolean = false, val locallySaved: Boolean = true)
     var saveFailure by mutableStateOf<SaveFailure?>(null)
         private set
 
@@ -106,7 +131,8 @@ class EditorViewModel : ViewModel() {
         private set
 
     val isDirty: Boolean get() = value.text != original
-    private var original: String = ""
+    private var original: String? = ""
+    private var draftOriginal: String? = null
     private var baseSha: String? = null
     private var loadedPath: String? = null
 
@@ -117,10 +143,10 @@ class EditorViewModel : ViewModel() {
     /** 预览模式：只读渲染当前文本（复用 Reader 渲染管线），不与输入框同时显示。 */
     var preview by mutableStateOf(false)
 
-    fun load(path: String) {
+    fun load(path: String, restoreDraftOnLoad: Boolean = false) {
         if (loadedPath == path) return
         loadedPath = path
-        fetch(path)
+        fetch(path, restoreDraftOnLoad)
     }
 
     /** 加载失败（离线未缓存 / 出错）后的重试入口。 */
@@ -128,17 +154,23 @@ class EditorViewModel : ViewModel() {
         loadedPath?.let(::fetch)
     }
 
-    private fun fetch(path: String) {
+    private fun fetch(path: String, restoreDraftOnLoad: Boolean = false) {
         viewModelScope.launch {
             loadHint = null
+            val saved = AppGraph.noteRepository.getPendingEdit(path)
+            draftOriginal = saved?.let { AppGraph.contentCache.get(it.baseSha)?.toString(Charsets.UTF_8) }
+            if (restoreDraftOnLoad && saved != null) {
+                pendingDraft = saved
+                restoreDraft()
+                return@launch
+            }
             when (val r = AppGraph.noteRepository.openNote(path)) {
                 is NoteOpenResult.Content -> {
                     // §39：冻结 base —— 之后 Tree refresh 不影响本次编辑
                     baseSha = r.entry.blobSha
                     original = r.markdown
-                    value = TextFieldValue(r.markdown, selection = TextRange(r.markdown.length))
+                    resetText(r.markdown)
                     loaded = true
-                    pendingDraft = AppGraph.noteRepository.getPendingEdit(path)
                     startAutoDraft(path)
                 }
                 is NoteOpenResult.OfflineNotCached -> {
@@ -150,6 +182,8 @@ class EditorViewModel : ViewModel() {
                     loadHint = "正文加载失败，请重试"
                 }
             }
+            // 普通入口等正文请求结束再提示恢复，避免迟到的加载结果覆盖已恢复的草稿。
+            pendingDraft = saved
         }
     }
 
@@ -161,8 +195,13 @@ class EditorViewModel : ViewModel() {
     fun restoreDraft() {
         val draft = pendingDraft ?: return
         baseSha = draft.baseSha
-        value = TextFieldValue(draft.content, selection = TextRange(draft.content.length))
+        original = draftOriginal
+        if (loaded) onValueChange(TextFieldValue(draft.content, TextRange(draft.content.length))) else resetText(draft.content)
+        loaded = true
+        loadHint = if (draftOriginal == null) "已恢复本机草稿，原版本未缓存；保存时仍会检查远端冲突" else null
+        draftStaged = true
         pendingDraft = null
+        loadedPath?.let(::startAutoDraft)
     }
 
     /** 放弃恢复：明确丢弃暂存。 */
@@ -186,11 +225,29 @@ class EditorViewModel : ViewModel() {
     fun save(onSaved: () -> Unit, onConflict: () -> Unit, onMessage: (String) -> Unit) {
         val path = loadedPath ?: return
         val sha = baseSha ?: return
-        if (!isDirty) { onSaved(); return } // 无修改：直接返回（§22）
         if (saveState == SaveState.SAVING) return // 防连点（§14）
+        if (!isDirty) {
+            if (canUndo || canRedo || draftStaged) discardAndLeave(onSaved) else onSaved()
+            return
+        }
         if (!AppGraph.network.isOnline) {
             // §23：不做离线队列；内容已在草稿里，对话框给复制出口，联网后再点保存
-            saveFailure = SaveFailure("当前没有网络连接，无法保存到 GitHub")
+            saveState = SaveState.SAVING
+            viewModelScope.launch {
+                try {
+                    autoDraftJob?.cancelAndJoin()
+                    AppGraph.noteRepository.stagePendingEdit(path, sha, value.text)
+                    draftStaged = true
+                    saveFailure = SaveFailure("当前没有网络连接，无法保存到 GitHub")
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    saveFailure = SaveFailure("本机草稿写入失败，请先复制全文", locallySaved = false)
+                } finally {
+                    saveState = SaveState.EDITING
+                    startAutoDraft(path)
+                }
+            }
             return
         }
         saveState = SaveState.SAVING
@@ -230,12 +287,29 @@ class EditorViewModel : ViewModel() {
         }
     }
 
-    /** 明确放弃修改时清掉暂存（用户已确认不要了）。 */
-    fun discardAndLeave(onLeave: () -> Unit) {
-        autoDraftJob?.cancel() // 先停防抖，防止离开瞬间迟到的写入把刚清掉的草稿复活
-        val path = loadedPath
-        viewModelScope.launch { if (path != null) AppGraph.noteRepository.clearPendingEdit(path) }
-        onLeave()
+    fun keepAndLeave(onLeave: () -> Unit) = leaveWithDraft(keep = true, onLeave)
+    fun discardAndLeave(onLeave: () -> Unit) = leaveWithDraft(keep = false, onLeave)
+
+    private fun leaveWithDraft(keep: Boolean, onLeave: () -> Unit) {
+        if (saveState == SaveState.SAVING) return
+        val path = loadedPath ?: return
+        val sha = baseSha ?: return
+        saveState = SaveState.SAVING
+        viewModelScope.launch {
+            try {
+                autoDraftJob?.cancelAndJoin()
+                if (keep) AppGraph.noteRepository.stagePendingEdit(path, sha, value.text)
+                else AppGraph.noteRepository.clearPendingEdit(path)
+                onLeave() // 本机操作完成后才导航，避免 ViewModel 被销毁而中断落盘。
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                saveFailure = SaveFailure("本机草稿操作失败，请先复制全文再重试", locallySaved = false)
+                startAutoDraft(path)
+            } finally {
+                saveState = SaveState.EDITING
+            }
+        }
     }
 
     /**
@@ -253,12 +327,19 @@ class EditorViewModel : ViewModel() {
                 .collect { text ->
                     val sha = baseSha ?: return@collect
                     if (saveState == SaveState.SAVING) return@collect // 保存飞行中输入已禁用，防御
-                    if (text == original) {
-                        AppGraph.noteRepository.clearPendingEdit(path)
+                    try {
+                        if (text == original) {
+                            AppGraph.noteRepository.clearPendingEdit(path)
+                            draftStaged = false
+                        } else {
+                            AppGraph.noteRepository.stagePendingEdit(path, sha, text)
+                            draftStaged = true
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
                         draftStaged = false
-                    } else {
-                        AppGraph.noteRepository.stagePendingEdit(path, sha, text)
-                        draftStaged = true
+                        saveFailure = SaveFailure("本机暂存失败，请先复制全文", locallySaved = false)
                     }
                 }
         }
@@ -269,13 +350,13 @@ class EditorViewModel : ViewModel() {
     private fun wrap(before: String, after: String) {
         val v = value
         val r = EditorTextOps.wrap(v.text, v.selection.min, v.selection.max, before, after)
-        value = TextFieldValue(r.text, TextRange(r.cursor))
+        onValueChange(TextFieldValue(r.text, TextRange(r.cursor)))
     }
 
     private fun linePrefix(prefix: String) {
         val v = value
         val r = EditorTextOps.linePrefix(v.text, v.selection.min, prefix)
-        value = TextFieldValue(r.text, TextRange(r.cursor))
+        onValueChange(TextFieldValue(r.text, TextRange(r.cursor)))
     }
 
     fun applyHeading() = linePrefix("## ")
@@ -289,13 +370,14 @@ class EditorViewModel : ViewModel() {
 @Composable
 fun EditorScreen(
     notePath: String,
+    restoreDraftOnLoad: Boolean = false,
     onLeave: () -> Unit,
     onOpenConflict: () -> Unit,
     onOpenToken: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: EditorViewModel = viewModel(),
 ) {
-    LaunchedEffect(notePath) { viewModel.load(notePath) }
+    LaunchedEffect(notePath) { viewModel.load(notePath, restoreDraftOnLoad) }
 
     var showDiscardDialog by remember { mutableStateOf(false) }
     val saving = viewModel.saveState == EditorViewModel.SaveState.SAVING
@@ -303,20 +385,31 @@ fun EditorScreen(
 
     // 数据安全：有修改时返回需确认（Phase 1 Discrepancy #6）；
     // 保存中（PUT 在飞行中）拦截系统返回 —— 半途离开会让远端/本地状态不确定
-    BackHandler(enabled = viewModel.isDirty || saving) {
-        if (saving) onShowSnackbar("正在保存，请稍候") else showDiscardDialog = true
+    BackHandler(enabled = viewModel.isDirty || saving || viewModel.canUndo || viewModel.canRedo) {
+        if (saving) onShowSnackbar("正在保存，请稍候")
+        else if (viewModel.isDirty) showDiscardDialog = true
+        else viewModel.discardAndLeave(onLeave)
     }
 
     if (showDiscardDialog) {
-        ConfirmationDialog(
-            title = "放弃未保存的修改？",
-            message = "当前修改尚未保存，放弃后将无法找回。",
-            confirmText = "放弃修改",
-            onConfirm = {
-                showDiscardDialog = false
-                viewModel.discardAndLeave(onLeave)
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            containerColor = AppColors.surface,
+            title = { Text("如何处理当前修改？", style = AppTypography.bodyBase) },
+            text = { Text("保留的内容可从首页草稿中心继续编辑，尚未上传到 GitHub。", style = AppTypography.bodySmall) },
+            confirmButton = {
+                TextButton(onClick = { showDiscardDialog = false; viewModel.keepAndLeave(onLeave) }) {
+                    Text("保留草稿并退出", color = AppColors.accent)
+                }
             },
-            onDismiss = { showDiscardDialog = false },
+            dismissButton = {
+                Column {
+                    TextButton(onClick = { showDiscardDialog = false; viewModel.discardAndLeave(onLeave) }) {
+                        Text("丢弃修改", color = AppColors.danger)
+                    }
+                    TextButton(onClick = { showDiscardDialog = false }) { Text("继续编辑") }
+                }
+            },
         )
     }
 
@@ -340,10 +433,10 @@ fun EditorScreen(
             onDismissRequest = viewModel::dismissSaveFailure,
             containerColor = AppColors.surface,
             shape = AppShapes.medium,
-            title = { Text("无法保存到 GitHub", style = AppTypography.bodyBase) },
+            title = { Text(if (failure.locallySaved) "无法保存到 GitHub" else "无法保存本机草稿", style = AppTypography.bodyBase) },
             text = {
                 Text(
-                    failure.message + "\n\n当前修改已保留在本机草稿中，不会丢失。",
+                    failure.message + if (failure.locallySaved) "\n\n当前修改已保留在本机草稿中。" else "",
                     style = AppTypography.bodySmall,
                     color = AppColors.textTertiary,
                 )
@@ -386,7 +479,9 @@ fun EditorScreen(
                 text = "取消",
                 onClick = {
                     if (saving) return@GhostButton
-                    if (viewModel.isDirty) showDiscardDialog = true else onLeave()
+                    if (viewModel.isDirty) showDiscardDialog = true
+                    else if (viewModel.canUndo || viewModel.canRedo || viewModel.draftStaged) viewModel.discardAndLeave(onLeave)
+                    else onLeave()
                 },
                 small = true,
             )
@@ -429,6 +524,8 @@ fun EditorScreen(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            EditorToolButton(label = "撤销", onClick = viewModel::undo, enabled = toolsEnabled && viewModel.canUndo)
+            EditorToolButton(label = "重做", onClick = viewModel::redo, enabled = toolsEnabled && viewModel.canRedo)
             EditorToolButton(label = "H", onClick = viewModel::applyHeading, enabled = toolsEnabled)
             EditorToolButton(label = "B", bold = true, onClick = viewModel::applyBold, enabled = toolsEnabled)
             EditorToolIcon(icon = AppIcons.List, description = "列表", onClick = viewModel::applyListItem, enabled = toolsEnabled)
@@ -446,6 +543,7 @@ fun EditorScreen(
                 .padding(horizontal = AppSpacing.readerPaddingHorizontal, vertical = 16.dp),
         ) {
             val hint = viewModel.loadHint
+            if (hint != null && viewModel.loaded) Text(hint, style = AppTypography.caption, color = AppColors.textTertiary)
             when {
                 // 预览：只读渲染当前文本（预览中文本不可变，每次进入只解析一次）
                 viewModel.preview && viewModel.loaded -> EditorPreview(
@@ -455,7 +553,7 @@ fun EditorScreen(
                 // 保存中禁用输入：保存的是发起时的快照，飞行中新敲的字不会进 PUT 也不会进 draft
                 viewModel.loaded -> BasicTextField(
                     value = viewModel.value,
-                    onValueChange = { viewModel.value = it },
+                    onValueChange = viewModel::onValueChange,
                     enabled = !saving,
                     textStyle = AppTypography.editorSource.copy(color = AppColors.textPrimary),
                     cursorBrush = SolidColor(AppColors.accent),

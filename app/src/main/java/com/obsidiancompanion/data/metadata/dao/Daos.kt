@@ -107,6 +107,12 @@ interface RecentSearchDao {
 /** Phase 5 §20-§21：PendingEdit（保存前暂存 / 成功清除）。 */
 @Dao
 interface PendingEditDao {
+    @Query("SELECT * FROM pending_edits ORDER BY updatedAt DESC")
+    fun observeAll(): Flow<List<PendingEditEntity>>
+
+    @Query("DELETE FROM pending_edits WHERE repoId = :repoId AND path = :path AND baseSha = :baseSha AND content = :content AND updatedAt = :updatedAt")
+    suspend fun deleteIfUnchanged(repoId: String, path: String, baseSha: String, content: String, updatedAt: Long): Int
+
     @Query("SELECT * FROM pending_edits")
     suspend fun getAll(): List<PendingEditEntity>
 

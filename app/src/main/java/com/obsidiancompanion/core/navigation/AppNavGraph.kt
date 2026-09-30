@@ -35,6 +35,7 @@ import com.obsidiancompanion.core.ui.AppSnackbarHost
 import com.obsidiancompanion.core.ui.BottomNavItem
 import com.obsidiancompanion.feature.capture.QuickCaptureScreen
 import com.obsidiancompanion.feature.editor.EditorScreen
+import com.obsidiancompanion.feature.drafts.DraftsScreen
 import com.obsidiancompanion.feature.files.FilesScreen
 import com.obsidiancompanion.feature.home.HomeScreen
 import com.obsidiancompanion.feature.onboarding.OnboardingConfirmScreen
@@ -90,14 +91,13 @@ fun AppNavGraph() {
     val tabRoutes = setOf(Routes.HOME, Routes.FILES, Routes.SEARCH, Routes.SETTINGS)
     val showBottomBar = currentRoute in tabRoutes
 
-    // 系统分享接收：暂存文本存在且已进入主界面（不在启动门/Onboarding）时打开快速收集页。
-    // 未完成 Onboarding 时保持暂存 —— 完成引导到达主 tab 后自动接着打开。
-    // 暂存由 QuickCaptureViewModel 进入时消费（系统返回不会触发本 effect 重开页面）；
-    // launchSingleTop 防连续两次分享在首个导航生效前叠出两个收集页。
-    val sharedText by AppGraph.pendingSharedText.collectAsState()
-    LaunchedEffect(sharedText, currentRoute) {
-        if (sharedText != null && currentRoute in tabRoutes) {
-            navController.navigate(Routes.QUICK_CAPTURE) { launchSingleTop = true }
+    // 正文在 Activity 收到分享时已落盘；导航只传 ID，不携带用户正文。
+    val pendingCaptureId by AppGraph.pendingCaptureId.collectAsState()
+    LaunchedEffect(pendingCaptureId, currentRoute) {
+        val id = pendingCaptureId
+        if (id != null && (currentRoute in tabRoutes || currentRoute == Routes.DRAFTS)) {
+            AppGraph.pendingCaptureId.value = null
+            navController.navigate(Routes.capture(id)) { launchSingleTop = true }
         }
     }
 
@@ -221,8 +221,8 @@ fun AppNavGraph() {
                     onOpenSearch = { navigateToTab(Routes.SEARCH) },
                     onOpenFiles = { navigateToTab(Routes.FILES) },
                     onOpenSync = { navController.navigate(Routes.SYNC) },
-                    onOpenCapture = {
-                        navController.navigate(Routes.QUICK_CAPTURE) { launchSingleTop = true }
+                    onOpenDrafts = {
+                        navController.navigate(Routes.DRAFTS) { launchSingleTop = true }
                     },
                 )
             }
@@ -319,12 +319,16 @@ fun AppNavGraph() {
             }
             composable(
                 route = Routes.EDITOR,
-                arguments = listOf(navArgument("noteId") { type = NavType.StringType }),
+                arguments = listOf(
+                    navArgument("noteId") { type = NavType.StringType },
+                    navArgument("restoreDraft") { type = NavType.BoolType; defaultValue = false },
+                ),
             ) { entry ->
                 val noteId = entry.arguments?.getString("noteId").orEmpty()
                 val decodedPath = URLDecoder.decode(noteId, "UTF-8")
                 EditorScreen(
                     notePath = decodedPath,
+                    restoreDraftOnLoad = entry.arguments?.getBoolean("restoreDraft") ?: false,
                     onLeave = { navController.popBackStack() },
                     onOpenConflict = {
                         navController.navigate(Routes.conflict(URLEncoder.encode(decodedPath, "UTF-8")))
@@ -342,7 +346,18 @@ fun AppNavGraph() {
                 )
             }
             // 快速收集：系统分享文本 → 新笔记
-            composable(Routes.QUICK_CAPTURE) {
+            composable(Routes.DRAFTS) {
+                DraftsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenEdit = { path -> navController.navigate(Routes.editor(URLEncoder.encode(path, "UTF-8"), restoreDraft = true)) },
+                    onOpenCapture = { id -> navController.navigate(Routes.capture(id)) },
+                    onShowSnackbar = ::showSnackbar,
+                )
+            }
+            composable(
+                Routes.QUICK_CAPTURE,
+                arguments = listOf(navArgument("draftId") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) {
                 QuickCaptureScreen(
                     onLeave = { navController.popBackStack() },
                     onShowSnackbar = ::showSnackbar,
