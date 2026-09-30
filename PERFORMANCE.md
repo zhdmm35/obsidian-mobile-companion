@@ -1,6 +1,6 @@
 # Android 性能验证记录
 
-本轮性能改动在 `main` 源码中，尚未新增 GitHub Release；下载页的 v0.1.2 APK 仍是原候选版。
+本轮性能改动随 [Android v0.1.3 候选版](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/v0.1.3) 发布。以下测量来自发版前的同一轮性能实现，版本升级没有改变搜索或草稿算法。
 
 ## 改动
 

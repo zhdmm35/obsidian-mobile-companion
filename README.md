@@ -8,7 +8,7 @@
 |---|---|---|
 | **Windows 轻量版 · 本机已有 Node.js 和 Git** | [下载轻量包](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/vaultsync-v0.2.0/VaultSync-v0.2.0-windows-light.zip) | 使用 PATH 中的 Node.js 20+ 和 Git；已包含工具依赖，无需 npm install |
 | **Windows 笔记自动同步工具 · VaultSync v0.2.0 正式版** | [下载 Windows x64 便携包](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/vaultsync-v0.2.0/VaultSync-v0.2.0-windows-x64.zip) · [版本说明](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/vaultsync-v0.2.0) | 内含 Node.js、Git，无需另装运行环境；需要自己的 GitHub 仓库 |
-| **Android 笔记应用 · v0.1.2 候选版** | [下载签名 APK](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/v0.1.2/obsidian-mobile-companion-v0.1.2.apk) | Android 8.0+；需要 GitHub 仓库和读写令牌；仍为预发布 |
+| **Android 笔记应用 · v0.1.3 候选版** | [下载签名 APK](https://github.com/zhdmm35/obsidian-mobile-companion/releases/download/v0.1.3/obsidian-mobile-companion-v0.1.3.apk) | Android 8.0+；需要 GitHub 仓库和读写令牌；仍为预发布 |
 
 Windows：**解压 → 双击 `VaultSync.vbs` → 选择笔记目录、填写仓库地址 → 检查配置并启用同步**。无需打开终端或编辑 JSON。便携包约 208 MB，首次连接可能需要完成 GitHub 登录。
 
@@ -26,11 +26,11 @@ An independent Android companion app for Markdown vaults stored in GitHub reposi
 
 一个独立的 Android 应用，用于浏览和编辑托管在 GitHub 仓库中的 Markdown 知识库。支持浏览与搜索笔记、渲染 Obsidian 常用语法、离线阅读已缓存笔记、编辑保存并显式处理冲突。另附 PC 端 `tools/vaultsync` 小工具，可将本地 Vault 目录与同一个 GitHub 仓库保持同步。
 
-> **Status / 状态:** Windows VaultSync v0.2.0 已正式发布，提供含运行环境的便携包；Android v0.1.2 仍为预发布候选，提供签名 APK 供试用。Android 与桌面工具独立发版。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
+> **Status / 状态:** Windows VaultSync v0.2.0 已正式发布，提供含运行环境的便携包；Android v0.1.3 仍为预发布候选，提供签名 APK 供试用。Android 与桌面工具独立发版。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
 
-## 未发布的性能改进 / Unreleased performance work
+## v0.1.3 性能改进 / Performance improvements
 
-`main` 已加入草稿逐条存储、正文搜索逐篇匹配、长笔记预览按需渲染和图片分级解码。合成数据对比与验证范围见 [性能记录](PERFORMANCE.md)；上方 v0.1.2 下载包尚不包含这些改动。
+v0.1.3 已加入草稿逐条存储、正文搜索逐篇匹配、长笔记预览按需渲染和图片分级解码。合成数据对比与验证范围见 [性能记录](PERFORMANCE.md)。
 
 ## Project positioning / 项目定位
 
@@ -92,7 +92,7 @@ This project is a GitHub Markdown knowledge-base mobile workflow, not only an Ob
 
 草稿不会自动上传，撤销/重做历史不会在退出或进程重启后恢复。编辑器尚未经过 1.5 秒暂存的新输入，若进程突然终止仍可能丢失；需要马上退出时请选择保留草稿。卸载应用或清除应用数据会删除本机草稿，请先保存或复制。
 
-Android v0.1.2 使用与 v0.1.1 相同的签名，支持直接覆盖安装。候选版验证步骤见 [试用说明](BETA_TESTING.md)，后续优先级见 [路线图](ROADMAP.md)。
+Android v0.1.3 使用与 v0.1.1 相同的签名，支持直接覆盖安装。候选版验证步骤见 [试用说明](BETA_TESTING.md)，后续优先级见 [路线图](ROADMAP.md)。
 
 ## How it works / 工作原理
 
@@ -177,9 +177,9 @@ GitHub Actions runs the Android unit tests and debug APK build, plus the `tools/
 
 ## Beta testing / 试用反馈
 
-Install the signed APK from the [v0.1.2 Release](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/v0.1.2), then test the complete loop with a repository you control: read cached notes offline, edit a note, create a deliberate remote conflict, render WikiLinks/callouts, and sync changes between the phone and `tools/vaultsync`. Use the [beta feedback issue form](.github/ISSUE_TEMPLATE/beta_feedback.yml) for results. Please report the device, Android version, app version, scenario, result, and sanitized logs; never include access tokens or private vault content.
+Install the signed APK from the [v0.1.3 Release](https://github.com/zhdmm35/obsidian-mobile-companion/releases/tag/v0.1.3), then test the complete loop with a repository you control: read cached notes offline, edit a note, create a deliberate remote conflict, render WikiLinks/callouts, and sync changes between the phone and `tools/vaultsync`. Use the [beta feedback issue form](.github/ISSUE_TEMPLATE/beta_feedback.yml) for results. Please report the device, Android version, app version, scenario, result, and sanitized logs; never include access tokens or private vault content.
 
-请真实试用 v0.1.2：在你能控制的 GitHub 仓库中测试离线阅读、编辑、远端冲突处理、WikiLink/Callout 渲染，以及手机与 `tools/vaultsync` 的双向同步。反馈请使用 [试用反馈 Issue 表单](.github/ISSUE_TEMPLATE/beta_feedback.yml)，填写设备、Android 版本、应用版本、测试场景、结果和脱敏日志，不要提交访问令牌或私人 Vault 内容。下载量、测试人数、关闭 Issue 数和修复项只按 GitHub Release 与真实反馈记录统计。
+请真实试用 v0.1.3：在你能控制的 GitHub 仓库中测试离线阅读、编辑、远端冲突处理、WikiLink/Callout 渲染，以及手机与 `tools/vaultsync` 的双向同步。反馈请使用 [试用反馈 Issue 表单](.github/ISSUE_TEMPLATE/beta_feedback.yml)，填写设备、Android 版本、应用版本、测试场景、结果和脱敏日志，不要提交访问令牌或私人 Vault 内容。下载量、测试人数、关闭 Issue 数和修复项只按 GitHub Release 与真实反馈记录统计。
 
 ## License / 许可证
 

@@ -1,6 +1,6 @@
 # Beta testing / 试用说明
 
-The v0.1.2 release is an installable prerelease for real-world feedback. Test it with a disposable or otherwise controlled GitHub Markdown repository before using it with important data.
+The v0.1.3 release is an installable prerelease for real-world feedback. Test it with a disposable or otherwise controlled GitHub Markdown repository before using it with important data.
 
 ## Suggested test pass
 
@@ -20,6 +20,16 @@ The v0.1.2 release is an installable prerelease for real-world feedback. Test it
 5. 复制全文核对内容；点丢弃弹窗外部应保留，明确确认才删除。连接另一仓库后，旧仓库的编辑草稿仍可复制，但不能误写到新仓库。
 
 候选版不包含自动上传队列。撤销历史只存在当前编辑会话；突然结束进程可能丢失尚未经过约 1.5 秒防抖的新输入。
+
+## v0.1.3 性能与升级验证
+
+1. 从 v0.1.1 或 v0.1.2 直接覆盖安装 v0.1.3，无需卸载；核对 Token、仓库、收藏、编辑草稿与多条分享草稿仍在。
+2. 分享内容后连续改名/目录，立即返回或切后台，重新打开应保留最后一次修改；复制全文核对长正文没有被列表摘要截断。
+3. 在较多缓存笔记中搜索正文，扫描期间应显示提示；快速改换关键词或清空，不应出现旧查询结果。未打开过的笔记仍不参与正文搜索。
+4. 打开长笔记预览并滚动；打开大图，双击或双指放大、拖动、还原，再滑动浏览同目录图片。
+5. 记录真实设备的启动、输入、滚动与搜索体验。模拟器的内存对比见 [性能记录](PERFORMANCE.md)，不作为真机帧率保证。
+
+分享草稿改名/目录约 250 ms 合并写入；正常返回会等待保存，切后台会安排立即写入。强制结束进程或断电仍可能丢失尚未落盘的输入。
 
 ## What to report
 
