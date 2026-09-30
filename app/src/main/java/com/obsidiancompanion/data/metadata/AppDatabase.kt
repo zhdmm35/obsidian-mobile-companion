@@ -11,6 +11,8 @@ import com.obsidiancompanion.data.metadata.dao.PendingEditDao
 import com.obsidiancompanion.data.metadata.dao.RecentSearchDao
 import com.obsidiancompanion.data.metadata.dao.RepoEntryDao
 import com.obsidiancompanion.data.metadata.dao.RepositoryStateDao
+import com.obsidiancompanion.data.metadata.dao.CaptureDraftDao
+import com.obsidiancompanion.data.metadata.entities.CaptureDraftEntity
 import com.obsidiancompanion.data.metadata.entities.NoteUserMetadataEntity
 import com.obsidiancompanion.data.metadata.entities.PendingEditEntity
 import com.obsidiancompanion.data.metadata.entities.RecentSearchEntity
@@ -20,7 +22,7 @@ import com.obsidiancompanion.data.metadata.entities.RepositoryStateEntity
 /**
  * App Metadata 库（§2/§40）：只存 repository tree/index、cache metadata、收藏、最近阅读、最近搜索。
  * Markdown 正文一律不进 Room（按 blob SHA 存 ContentCache）。
- * v2（Phase 5 §20）：新增 pending_edits —— 唯一的正文暂存例外（保存失败/冲突/崩溃恢复，成功即清）。
+ * 本机编辑/分享草稿是正文暂存例外；v3 新增 capture_drafts，避免分享草稿整份 JSON 写盘。
  */
 @Database(
     entities = [
@@ -29,8 +31,9 @@ import com.obsidiancompanion.data.metadata.entities.RepositoryStateEntity
         RecentSearchEntity::class,
         RepositoryStateEntity::class,
         PendingEditEntity::class,
+        CaptureDraftEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -39,8 +42,15 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun noteMetadataDao(): NoteMetadataDao
     abstract fun recentSearchDao(): RecentSearchDao
     abstract fun pendingEditDao(): PendingEditDao
+    abstract fun captureDraftDao(): CaptureDraftDao
 
     companion object {
+
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `capture_drafts` (`id` TEXT NOT NULL, `text` TEXT NOT NULL, `name` TEXT NOT NULL, `folder` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            }
+        }
 
         /** v1 → v2：仅新增 pending_edits 表；既有 Tree / 收藏 / 最近阅读 / 最近搜索全部保留。 */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -56,7 +66,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "app_metadata.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

@@ -2,17 +2,27 @@ package com.obsidiancompanion.data.capture
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.obsidiancompanion.data.metadata.dao.CaptureDraftDao
+import com.obsidiancompanion.data.metadata.entities.CaptureDraftEntity
 import java.util.UUID
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/** 每次分享独立保存；旧版单条草稿自动迁移，只有明确丢弃或上传成功才删除。 */
-class CaptureDraftStore(private val prefs: SharedPreferences) {
-    constructor(context: Context) : this(context.getSharedPreferences("capture_draft", Context.MODE_PRIVATE))
+/** Room 逐条保存分享内容；只有打开/复制/上传时读取全文，旧 SharedPreferences 在后台一次性迁移。 */
+class CaptureDraftStore(
+    private val prefs: SharedPreferences,
+    private val dao: CaptureDraftDao,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) {
+    constructor(context: Context, dao: CaptureDraftDao) :
+        this(context.getSharedPreferences("capture_draft", Context.MODE_PRIVATE), dao)
 
     @Serializable
     data class Draft(
@@ -23,51 +33,59 @@ class CaptureDraftStore(private val prefs: SharedPreferences) {
         val updatedAt: Long = System.currentTimeMillis(),
     )
 
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-    private val state = MutableStateFlow(read())
-    val drafts: StateFlow<List<Draft>> = state.asStateFlow()
+    private val json = Json { ignoreUnknownKeys = true }
+    private val initialization = Mutex()
+    private val writes = Mutex()
+    private var initialized = false
 
-    @Synchronized
-    fun create(text: String, name: String, folder: String = ""): Draft {
+    val drafts = flow { initialize(); emitAll(dao.observeSummaries()) }
+    val count = flow { initialize(); emitAll(dao.observeCount()) }
+
+    suspend fun initialize() = initialization.withLock {
+        if (!initialized) {
+            withContext(ioDispatcher) {
+                val encoded = prefs.getString("drafts", null)
+                val legacy = if (encoded != null) {
+                    json.decodeFromString<List<Draft>>(encoded)
+                } else {
+                    prefs.getString("text", null)?.let { text ->
+                        listOf(Draft(text, prefs.getString("name", "").orEmpty(), prefs.getString("folder", "").orEmpty(),
+                            id = UUID.nameUUIDFromBytes(("capture-legacy:" + text).toByteArray(Charsets.UTF_8)).toString()))
+                    }.orEmpty()
+                }
+                if (legacy.isNotEmpty()) dao.importLegacy(legacy.map { it.toEntity() })
+                // 数据库插入成功后才删旧副本；中途失败重试时 IGNORE 保持 ID 与用户后续修改。
+                if (encoded != null || prefs.contains("text")) {
+                    check(prefs.edit().remove("drafts").remove("text").remove("name").remove("folder").commit()) {
+                        "Cannot finish capture draft migration"
+                    }
+                }
+            }
+            initialized = true
+        }
+    }
+
+    suspend fun create(text: String, name: String, folder: String = ""): Draft {
+        initialize()
         val draft = Draft(text, name, folder)
-        persist(listOf(draft) + state.value)
+        dao.insert(draft.toEntity())
         return draft
     }
 
-    @Synchronized
-    fun update(id: String, name: String, folder: String): Draft? {
-        val old = state.value.find { it.id == id } ?: return null
-        if (old.name == name && old.folder == folder) return old
-        val changed = old.copy(name = name, folder = folder, updatedAt = System.currentTimeMillis())
-        persist(state.value.map { if (it.id == id) changed else it }.sortedByDescending { it.updatedAt })
-        return changed
+    suspend fun update(id: String, name: String, folder: String): Boolean {
+        initialize()
+        return writes.withLock { dao.update(id, name, folder, System.currentTimeMillis()) > 0 }
     }
 
-    @Synchronized
-    fun find(id: String): Draft? = state.value.find { it.id == id }
+    suspend fun find(id: String): Draft? { initialize(); return dao.get(id)?.toDraft() }
 
-    /** 比较完整快照：迟到的上传结果/丢弃确认不能删除后来修改的草稿。 */
-    @Synchronized
-    fun clearIfUnchanged(expected: Draft): Boolean {
-        if (find(expected.id) != expected) return false
-        persist(state.value.filterNot { it.id == expected.id })
-        return true
+    suspend fun clearIfUnchanged(expected: Draft): Boolean {
+        initialize()
+        return writes.withLock {
+            dao.deleteIfUnchanged(expected.id, expected.text, expected.name, expected.folder, expected.updatedAt) > 0
+        }
     }
 
-    private fun persist(drafts: List<Draft>) {
-        check(prefs.edit().putString("drafts", json.encodeToString(drafts))
-            .remove("text").remove("name").remove("folder").commit()) { "Cannot persist capture drafts" }
-        state.value = drafts
-    }
-
-    private fun read(): List<Draft> {
-        val encoded = prefs.getString("drafts", null)
-        if (encoded != null) return json.decodeFromString<List<Draft>>(encoded)
-            .sortedByDescending { it.updatedAt }
-        val text = prefs.getString("text", null) ?: return emptyList()
-        val migrated = listOf(Draft(text, prefs.getString("name", "").orEmpty(), prefs.getString("folder", "").orEmpty()))
-        check(prefs.edit().putString("drafts", json.encodeToString(migrated))
-            .remove("text").remove("name").remove("folder").commit()) { "Cannot migrate capture draft" }
-        return migrated
-    }
+    private fun Draft.toEntity() = CaptureDraftEntity(id, text, name, folder, updatedAt)
+    private fun CaptureDraftEntity.toDraft() = Draft(text, name, folder, id, updatedAt)
 }

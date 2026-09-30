@@ -5,9 +5,49 @@ import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 
 /** 搜索正文匹配：子串命中 / 计数 / 排序 / 摘要窗口（计数与摘要同在折叠文本上）。 */
 class ContentSearchTest {
+
+    @Test fun streamingSearchPreservesResultsAndSkipsUncachedAndNonMarkdown() = runTest {
+        val docs = snapshot("b.md" to "hit Hit", "a.md" to "hit", "c.md" to "no match")
+        val uncached = entry("uncached.md")
+        val directory = entry("folder").copy(kind = EntryKind.DIRECTORY)
+        val loaded = mutableListOf<String>()
+        val actual = searchCachedContents(docs.map { it.first } + uncached + directory, " HiT ") { e ->
+            loaded += e.path
+            docs.find { it.first == e }?.second
+        }
+        assertEquals(searchContents(docs, "HiT"), actual)
+        assertEquals(listOf("b.md", "a.md", "c.md", "uncached.md"), loaded)
+    }
+
+    @Test fun blankStreamingQueryDoesNoDiskReads() = runTest {
+        val matches = searchCachedContents(listOf(entry("a.md")), "   ") { error("Must not load") }
+        assertTrue(matches.isEmpty())
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun cancellingOldQueryStopsLoadingAndNeverPublishesPartialResults() = runTest {
+        val loaded = mutableListOf<String>()
+        var published = false
+        val job = launch {
+            searchCachedContents(listOf(entry("a.md"), entry("b.md")), "hit") {
+                loaded += it.path
+                awaitCancellation()
+            }
+            published = true
+        }
+        runCurrent()
+        job.cancelAndJoin()
+        assertEquals(listOf("a.md"), loaded)
+        assertTrue(!published)
+    }
 
     /* ── fixtures ─────────────────────────────────────────── */
 

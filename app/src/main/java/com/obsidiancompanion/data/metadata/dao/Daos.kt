@@ -9,6 +9,9 @@ import com.obsidiancompanion.data.metadata.entities.PendingEditEntity
 import com.obsidiancompanion.data.metadata.entities.RecentSearchEntity
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.data.metadata.entities.RepositoryStateEntity
+import com.obsidiancompanion.data.metadata.entities.CaptureDraftEntity
+import com.obsidiancompanion.data.metadata.entities.CaptureDraftSummary
+import com.obsidiancompanion.data.metadata.entities.PendingEditSummary
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -107,6 +110,12 @@ interface RecentSearchDao {
 /** Phase 5 §20-§21：PendingEdit（保存前暂存 / 成功清除）。 */
 @Dao
 interface PendingEditDao {
+    @Query("SELECT COUNT(*) FROM pending_edits")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT repoId, path, substr(content, 1, 160) AS preview, updatedAt FROM pending_edits ORDER BY updatedAt DESC")
+    fun observeSummaries(): Flow<List<PendingEditSummary>>
+
     @Query("SELECT * FROM pending_edits ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<PendingEditEntity>>
 
@@ -128,4 +137,28 @@ interface PendingEditDao {
 
     @Query("DELETE FROM pending_edits WHERE repoId = :repoId AND path = :path")
     suspend fun delete(repoId: String, path: String)
+}
+
+@Dao
+interface CaptureDraftDao {
+    @Query("SELECT id, name, folder, substr(text, 1, 160) AS preview, updatedAt FROM capture_drafts ORDER BY updatedAt DESC, id ASC")
+    fun observeSummaries(): Flow<List<CaptureDraftSummary>>
+
+    @Query("SELECT COUNT(*) FROM capture_drafts")
+    fun observeCount(): Flow<Int>
+
+    @Query("SELECT * FROM capture_drafts WHERE id = :id")
+    suspend fun get(id: String): CaptureDraftEntity?
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(draft: CaptureDraftEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun importLegacy(drafts: List<CaptureDraftEntity>)
+
+    @Query("UPDATE capture_drafts SET updatedAt = CASE WHEN name = :name AND folder = :folder THEN updatedAt ELSE :updatedAt END, name = :name, folder = :folder WHERE id = :id")
+    suspend fun update(id: String, name: String, folder: String, updatedAt: Long): Int
+
+    @Query("DELETE FROM capture_drafts WHERE id = :id AND text = :text AND name = :name AND folder = :folder AND updatedAt = :updatedAt")
+    suspend fun deleteIfUnchanged(id: String, text: String, name: String, folder: String, updatedAt: Long): Int
 }

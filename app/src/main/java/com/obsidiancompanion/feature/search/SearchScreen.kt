@@ -63,6 +63,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /** 正文搜索输入防抖：文件名过滤是内存即时，正文要读缓存文件，延迟合键。 */
@@ -84,6 +85,9 @@ class SearchViewModel : ViewModel() {
 
     /** 正文匹配结果（含已缓存正文的笔记；展示时与文件名命中去重，见 SearchScreen） */
     var contentResults by mutableStateOf<List<ContentMatch>>(emptyList())
+        private set
+
+    var searchingContent by mutableStateOf(false)
         private set
 
     /** Room 里的最近搜索（最多 10 条，展示前 6） */
@@ -158,33 +162,28 @@ class SearchViewModel : ViewModel() {
         }
     }
 
-    /**
-     * 正文搜索：取消旧 job → 防抖 → 重扫缓存后匹配；空 query 直接清空。
-     * 每次都重扫（不缓存快照）：ContentCache 没有失效信号，用户打开新笔记后回到
-     * 本页时 ViewModel 仍存活，缓存旧快照会把新缓存的正文永远挡在结果外。
-     * 434 篇规模的单次 IO 重扫在防抖后可接受（与 Reader deadLinks 扫描同量级）。
-     */
+    /** 防抖后逐篇读取缓存；只保留结果摘要，旧查询可在文件之间及匹配计数时取消。 */
     private fun scheduleContentSearch() {
         contentJob?.cancel()
+        contentResults = emptyList()
         val q = query.trim()
-        if (q.isEmpty()) {
-            contentResults = emptyList()
-            return
-        }
+        searchingContent = q.isNotEmpty()
+        if (q.isEmpty()) return
+        val entries = tree
         contentJob = viewModelScope.launch {
-            delay(CONTENT_SEARCH_DEBOUNCE_MS)
-            val snapshot = buildContentSnapshot()
-            contentResults = withContext(Dispatchers.Default) { searchContents(snapshot, q) }
-        }
-    }
-
-    /** 快照 = tree 中已缓存正文的 MARKDOWN 条目（按 blobSha 寻址读取）；未缓存的笔记不参与。 */
-    private suspend fun buildContentSnapshot(): List<Pair<RepoEntryEntity, String>> =
-        withContext(Dispatchers.IO) {
-            tree.filter { it.kind == EntryKind.MARKDOWN }.mapNotNull { entry ->
-                AppGraph.contentCache.get(entry.blobSha)?.let { bytes -> entry to String(bytes, Charsets.UTF_8) }
+            try {
+                delay(CONTENT_SEARCH_DEBOUNCE_MS)
+                contentResults = withContext(Dispatchers.Default) {
+                    searchCachedContents(entries, q) { entry ->
+                        AppGraph.contentCache.get(entry.blobSha)?.toString(Charsets.UTF_8)
+                    }
+                }
+            } finally {
+                // 取消的旧任务不能收起新查询的加载提示；清空查询由上面的入口处理。
+                if (isActive) searchingContent = false
             }
         }
+    }
 
     private fun recordRecent(raw: String) {
         val q = raw.trim()
@@ -208,7 +207,8 @@ fun SearchScreen(
     // 正文命中与文件名命中同篇去重：文件名区已能到达的笔记不再重复展示；
     // remember 避免每次重组重算 O(n×m) 过滤
     val contentMatches = remember(results, viewModel.contentResults) {
-        viewModel.contentResults.filter { match -> results.none { it.path == match.entry.path } }
+        val filenamePaths = results.mapTo(HashSet()) { it.path }
+        viewModel.contentResults.filter { it.entry.path !in filenamePaths }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -306,8 +306,8 @@ fun SearchScreen(
             ) {
                 EmptyState(
                     illustration = R.drawable.spot_search,
-                    title = "没有找到「${viewModel.query.trim()}」相关的笔记",
-                    subtitle = "试试更短的关键词；正文匹配只覆盖打开过的笔记",
+                    title = if (viewModel.searchingContent) "正在搜索已缓存正文…" else "没有找到「${viewModel.query.trim()}」相关的笔记",
+                    subtitle = if (viewModel.searchingContent) "缓存内容较多时，请稍候" else "试试更短的关键词；正文匹配只覆盖打开过的笔记",
                 )
             }
             else -> {
@@ -316,6 +316,10 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = AppSpacing.screenBottomPadding),
                 ) {
+                    if (viewModel.searchingContent) item {
+                        Text("正在搜索已缓存正文…", style = AppTypography.caption, color = AppColors.textTertiary,
+                            modifier = Modifier.padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 8.dp))
+                    }
                     if (results.isNotEmpty()) {
                         item { SectionHeader("文件名匹配 · ${results.size}") }
                         itemsIndexed(results, key = { _, entry -> "n:${entry.path}" }) { index, entry ->

@@ -28,6 +28,10 @@ An independent Android companion app for Markdown vaults stored in GitHub reposi
 
 > **Status / 状态:** Windows VaultSync v0.2.0 已正式发布，提供含运行环境的便携包；Android v0.1.2 仍为预发布候选，提供签名 APK 供试用。Android 与桌面工具独立发版。This project is not affiliated with or endorsed by Obsidian.md. 本项目与 Obsidian.md 无任何关联或背书关系。
 
+## 未发布的性能改进 / Unreleased performance work
+
+`main` 已加入草稿逐条存储、正文搜索逐篇匹配、长笔记预览按需渲染和图片分级解码。合成数据对比与验证范围见 [性能记录](PERFORMANCE.md)；上方 v0.1.2 下载包尚不包含这些改动。
+
 ## Project positioning / 项目定位
 
 This project is a GitHub Markdown knowledge-base mobile workflow, not only an Obsidian reader. It connects four pieces into one auditable loop:

@@ -6,6 +6,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -534,8 +537,9 @@ fun EditorScreen(
         }
         AppHorizontalDivider()
 
-        // 源文本
-        Column(
+        if (viewModel.preview && viewModel.loaded) {
+            EditorPreview(viewModel.value.text, notePath, Modifier.weight(1f))
+        } else Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
@@ -545,11 +549,6 @@ fun EditorScreen(
             val hint = viewModel.loadHint
             if (hint != null && viewModel.loaded) Text(hint, style = AppTypography.caption, color = AppColors.textTertiary)
             when {
-                // 预览：只读渲染当前文本（预览中文本不可变，每次进入只解析一次）
-                viewModel.preview && viewModel.loaded -> EditorPreview(
-                    markdown = viewModel.value.text,
-                    notePath = notePath,
-                )
                 // 保存中禁用输入：保存的是发起时的快照，飞行中新敲的字不会进 PUT 也不会进 draft
                 viewModel.loaded -> BasicTextField(
                     value = viewModel.value,
@@ -628,10 +627,10 @@ private fun EditorToolIcon(
 /**
  * 编辑预览：当前文本的一次性只读渲染（复用 Reader 渲染管线）。
  * 预览中文本不可变 → produceState 每次进入只解析一次；链接/图片点击在预览中惰性（不跳转）。
- * 外层容器已是 verticalScroll（与源文本同一滚动区），故用普通 Column 而非 LazyColumn。
+ * 独立 LazyColumn 只组合可见块，避免长笔记一次渲染所有段落和图片。
  */
 @Composable
-private fun EditorPreview(markdown: String, notePath: String) {
+private fun EditorPreview(markdown: String, notePath: String, modifier: Modifier) {
     val document by produceState<MdDocument?>(null, markdown) {
         value = withContext(Dispatchers.Default) { MarkdownParser.parse(markdown) }
     }
@@ -646,8 +645,11 @@ private fun EditorPreview(markdown: String, notePath: String) {
         Text("正在生成预览…", style = AppTypography.bodySmall, color = AppColors.textTertiary)
         return
     }
-    Column(Modifier.fillMaxWidth()) {
-        doc.blocks.forEach { block ->
+    LazyColumn(
+        modifier = modifier.fillMaxWidth().background(AppColors.surface),
+        contentPadding = PaddingValues(horizontal = AppSpacing.readerPaddingHorizontal, vertical = 16.dp),
+    ) {
+        itemsIndexed(doc.blocks) { _, block ->
             ReaderBlockRenderer(
                 block = block,
                 links = links,

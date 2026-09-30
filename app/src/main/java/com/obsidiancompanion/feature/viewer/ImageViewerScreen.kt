@@ -58,7 +58,8 @@ private val ViewerBackground = Color(0xFF121110)
 private val ViewerTextPrimary = Color(0xFFF2F0EB)
 private val ViewerTextSecondary = Color(0xFFA6A29A)
 
-/** 解码上限：大图按最长边 ~4096px 采样，兼顾缩放细节与内存（硬件 bitmap 不占 Java 堆）。 */
+/** 普通浏览先解码到 2048px；用户放大后才请求 4096px，避免每页先占用大位图。 */
+private const val INITIAL_DECODE_PX = 2048
 private const val MAX_DECODE_PX = 4096
 
 /**
@@ -102,10 +103,12 @@ fun ImageViewerScreen(initialPath: String, onBack: () -> Unit) {
         HorizontalPager(
             state = pagerState,
             userScrollEnabled = currentScale <= 1f,
-            beyondViewportPageCount = 1, // 预载相邻一页，快速滑动不闪加载圈
+            beyondViewportPageCount = 0,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            ViewerPage(
+            // Pager 可能预组合下一页；只有当前/实际可见页才读附件并解码。
+            val visible = page == pagerState.currentPage || pagerState.layoutInfo.visiblePagesInfo.any { it.index == page }
+            if (visible) ViewerPage(
                 path = list[page],
                 onScaleChange = { if (page == pagerState.currentPage) currentScale = it },
             )
@@ -164,6 +167,12 @@ private fun ZoomableImage(result: ImageResult.Ready, onScaleChange: (Float) -> U
     val context = LocalContext.current
     var transform by remember { mutableStateOf(ViewTransform()) }
     var decodeFailed by remember(result) { mutableStateOf(false) }
+    var highResolution by remember(result) { mutableStateOf(false) }
+    LaunchedEffect(transform.scale) { if (transform.scale > 1f) highResolution = true }
+    val decodeSize = if (highResolution) MAX_DECODE_PX else INITIAL_DECODE_PX
+    val imageRequest = remember(context, result, decodeSize) {
+        ImageRequest.Builder(context).data(result.bytes).size(decodeSize, decodeSize).build()
+    }
     // 容器与解码后内容尺寸（px），用于缩放钳制
     var viewport by remember(result) { mutableStateOf(Viewport(0f, 0f, 0f, 0f)) }
 
@@ -191,10 +200,7 @@ private fun ZoomableImage(result: ImageResult.Ready, onScaleChange: (Float) -> U
             ViewerPlaceholder(result.path, "图片无法显示（格式可能暂不支持）")
         } else {
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(result.bytes)
-                    .size(MAX_DECODE_PX, MAX_DECODE_PX)
-                    .build(),
+                model = imageRequest,
                 contentDescription = result.path.substringAfterLast('/'),
                 contentScale = ContentScale.Fit,
                 onSuccess = { state ->

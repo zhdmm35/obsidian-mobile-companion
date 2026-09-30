@@ -15,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -48,9 +49,10 @@ data class HomeUiState(
 class HomeViewModel : ViewModel() {
 
     val draftCount = combine(
-        AppGraph.database.pendingEditDao().observeAll(),
-        AppGraph.captureDraft.drafts,
-    ) { edits, shares -> edits.size + shares.size }
+        AppGraph.database.pendingEditDao().observeCount(),
+        AppGraph.captureDraft.count,
+    ) { edits, shares -> edits + shares }
+        .catch { emit(-1) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     private val settings = AppGraph.settings

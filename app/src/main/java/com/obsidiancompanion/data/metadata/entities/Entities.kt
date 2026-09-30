@@ -1,6 +1,7 @@
 package com.obsidiancompanion.data.metadata.entities
 
 import androidx.room.Entity
+import androidx.room.PrimaryKey
 
 /** Repository Tree 条目类型（§17：按扩展名从 Tree API 结果构建 UI 类型）。 */
 enum class EntryKind { DIRECTORY, MARKDOWN, IMAGE, PDF, CANVAS, OTHER }
@@ -70,3 +71,16 @@ data class PendingEditEntity(
     val content: String,
     val updatedAt: Long,
 )
+
+/** 分享正文独立存储；改名字/目录只更新这一条，列表仅查询摘要。 */
+@Entity(tableName = "capture_drafts")
+data class CaptureDraftEntity(
+    @PrimaryKey val id: String,
+    val text: String,
+    val name: String,
+    val folder: String,
+    val updatedAt: Long,
+)
+
+data class CaptureDraftSummary(val id: String, val name: String, val folder: String, val preview: String, val updatedAt: Long)
+data class PendingEditSummary(val repoId: String, val path: String, val preview: String, val updatedAt: Long)

@@ -1,6 +1,9 @@
 package com.obsidiancompanion.feature.search
 
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
+import com.obsidiancompanion.data.metadata.entities.EntryKind
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** 正文命中：所属 Tree 条目 + 首个命中处摘要 + 总命中次数。 */
 data class ContentMatch(
@@ -22,22 +25,48 @@ private fun normalizeQuery(query: String): String = query.trim().replace(WS_RUN,
  * 计数与摘要都在同一段空白折叠文本上计算（换行/连续空格视为单空格）：
  * 单一事实源，短语跨行也能命中；一篇只扫一遍。
  */
+private val matchOrder = compareByDescending<ContentMatch> { it.count }.thenBy { it.entry.path }
+
 fun searchContents(snapshot: List<Pair<RepoEntryEntity, String>>, query: String): List<ContentMatch> {
     val q = normalizeQuery(query)
     if (q.isEmpty()) return emptyList()
-    return snapshot.mapNotNull { (entry, content) ->
-        val flat = content.replace(WS_RUN, " ")
-        var first = -1
-        var count = 0
-        var idx = flat.indexOf(q, ignoreCase = true)
-        while (idx >= 0) {
-            if (first < 0) first = idx
-            count++
-            idx = flat.indexOf(q, idx + q.length, ignoreCase = true)
-        }
-        if (count == 0) null
-        else ContentMatch(entry, snippetWindow(flat, first, q.length), count)
-    }.sortedWith(compareByDescending<ContentMatch> { it.count }.thenBy { it.entry.path })
+    return snapshot.mapNotNull { (entry, content) -> matchContent(entry, content, q) }.sortedWith(matchOrder)
+}
+
+/** 逐篇读缓存并匹配；只保留短摘要，查询取消后停止加载下一篇。调用方负责选择后台 dispatcher。 */
+suspend fun searchCachedContents(
+    entries: List<RepoEntryEntity>,
+    query: String,
+    loadContent: suspend (RepoEntryEntity) -> String?,
+): List<ContentMatch> {
+    val q = normalizeQuery(query)
+    if (q.isEmpty()) return emptyList()
+    val context = currentCoroutineContext()
+    val matches = mutableListOf<ContentMatch>()
+    for (entry in entries) {
+        context.ensureActive()
+        if (entry.kind != EntryKind.MARKDOWN) continue
+        val content = loadContent(entry) ?: continue
+        context.ensureActive()
+        matchContent(entry, content, q) { context.ensureActive() }?.let(matches::add)
+    }
+    context.ensureActive()
+    return matches.sortedWith(matchOrder)
+}
+
+private fun matchContent(entry: RepoEntryEntity, content: String, q: String,
+    checkActive: () -> Unit = {}): ContentMatch? {
+    val flat = content.replace(WS_RUN, " ")
+    var first = -1
+    var count = 0
+    var idx = flat.indexOf(q, ignoreCase = true)
+    while (idx >= 0) {
+        if (count % 256 == 0) checkActive()
+        if (first < 0) first = idx
+        count++
+        idx = flat.indexOf(q, idx + q.length, ignoreCase = true)
+    }
+    return if (count == 0) null else ContentMatch(entry, snippetWindow(flat, first, q.length), count)
 }
 
 /** 摘要取窗（输入为已折叠文本）：[hitIndex, hitIndex+hitLength) 命中处前后各取窗，截断边加省略号。 */

@@ -7,6 +7,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.obsidiancompanion.core.design.AppTheme
 import com.obsidiancompanion.core.navigation.AppNavGraph
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -30,9 +34,20 @@ class MainActivity : ComponentActivity() {
     private fun handleShareIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true) {
             val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() } ?: return
-            val draft = AppGraph.captureDraft.create(text, com.obsidiancompanion.feature.capture.defaultCaptureTitle(text))
-            AppGraph.pendingCaptureId.value = draft.id
             intent.removeExtra(Intent.EXTRA_TEXT) // 防旋转重建时重复入队
+            val app = applicationContext
+            AppGraph.appScope.launch {
+                try {
+                    val draft = AppGraph.captureDraft.create(text, com.obsidiancompanion.feature.capture.defaultCaptureTitle(text))
+                    AppGraph.pendingCaptureId.value = draft.id // 落盘成功后才打开收集页。
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(app, "分享内容保存失败，请重新分享", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         }
     }
 

@@ -122,7 +122,7 @@ fun HomeScreen(
                 Column(Modifier.weight(1f)) {
                     Text("草稿中心", style = AppTypography.rowTitleSmall)
                     Text(
-                        if (draftCount == 0) "编辑与分享草稿都在这里" else "$draftCount 条待处理草稿",
+                        if (draftCount < 0) "草稿读取失败，点击查看" else if (draftCount == 0) "编辑与分享草稿都在这里" else "$draftCount 条待处理草稿",
                         style = AppTypography.caption,
                         color = AppColors.textTertiary,
                         maxLines = 1,

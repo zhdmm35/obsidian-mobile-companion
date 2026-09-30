@@ -33,31 +33,69 @@ import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.GhostButton
 import com.obsidiancompanion.data.capture.CaptureDraftStore
 import com.obsidiancompanion.data.metadata.entities.PendingEditEntity
+import com.obsidiancompanion.data.metadata.entities.PendingEditSummary
+import com.obsidiancompanion.data.metadata.entities.CaptureDraftSummary
 import com.obsidiancompanion.util.Format
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 data class DraftsUiState(
     val loading: Boolean = true,
+    val error: String? = null,
     val repoId: String? = null,
-    val edits: List<PendingEditEntity> = emptyList(),
-    val shares: List<CaptureDraftStore.Draft> = emptyList(),
+    val edits: List<PendingEditSummary> = emptyList(),
+    val shares: List<CaptureDraftSummary> = emptyList(),
 )
 
 class DraftsViewModel : ViewModel() {
     private val dao = AppGraph.database.pendingEditDao()
-    val state = combine(AppGraph.settings.flow, dao.observeAll(), AppGraph.captureDraft.drafts) { settings, edits, shares ->
-        DraftsUiState(false, settings.repoId, edits, shares)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DraftsUiState())
+    val state = combine(AppGraph.settings.flow, dao.observeSummaries(), AppGraph.captureDraft.drafts) { settings, edits, shares ->
+        DraftsUiState(loading = false, repoId = settings.repoId, edits = edits, shares = shares)
+    }.catch { emit(DraftsUiState(loading = false, error = "草稿读取失败，原有数据仍保留，请返回后重试")) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DraftsUiState())
+
+    fun copy(edit: PendingEditSummary?, share: CaptureDraftSummary?, onCopied: (String) -> Unit, onMessage: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val text = if (edit != null) dao.get(edit.repoId, edit.path)?.content
+                    else share?.let { AppGraph.captureDraft.find(it.id)?.text }
+                if (text == null) onMessage("草稿已被删除，请刷新后重试") else onCopied(text)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onMessage("草稿操作失败，请稍后重试") }
+        }
+    }
+
+    fun prepareDiscard(edit: PendingEditSummary?, share: CaptureDraftSummary?,
+        onReady: (PendingEditEntity?, CaptureDraftStore.Draft?) -> Unit, onMessage: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                if (edit != null) {
+                    val full = dao.get(edit.repoId, edit.path)
+                    if (full != null && full.updatedAt == edit.updatedAt && full.content.startsWith(edit.preview)) onReady(full, null)
+                    else onMessage("草稿已发生变化，请检查后重新操作")
+                } else if (share != null) {
+                    val full = AppGraph.captureDraft.find(share.id)
+                    if (full != null && full.updatedAt == share.updatedAt && full.name == share.name && full.folder == share.folder) onReady(null, full)
+                    else onMessage("草稿已发生变化，请检查后重新操作")
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onMessage("草稿操作失败，请稍后重试") }
+        }
+    }
 
     fun discard(edit: PendingEditEntity?, share: CaptureDraftStore.Draft?, onMessage: (String) -> Unit) {
         viewModelScope.launch {
-            val removed = if (edit != null) {
-                dao.deleteIfUnchanged(edit.repoId, edit.path, edit.baseSha, edit.content, edit.updatedAt) > 0
-            } else share != null && AppGraph.captureDraft.clearIfUnchanged(share)
-            onMessage(if (removed) "草稿已丢弃" else "草稿已发生变化，请检查后重新操作")
+            try {
+                val removed = if (edit != null) {
+                    dao.deleteIfUnchanged(edit.repoId, edit.path, edit.baseSha, edit.content, edit.updatedAt) > 0
+                } else share != null && AppGraph.captureDraft.clearIfUnchanged(share)
+                onMessage(if (removed) "草稿已丢弃" else "草稿已发生变化，请检查后重新操作")
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { onMessage("草稿操作失败，请稍后重试") }
         }
     }
 }
@@ -102,6 +140,7 @@ fun DraftsScreen(
                     style = AppTypography.bodySmall, color = AppColors.textTertiary)
             }
             if (state.loading) item { Text("正在读取草稿…", style = AppTypography.bodySmall) }
+            else if (state.error != null) item { Text(state.error.orEmpty(), style = AppTypography.bodySmall, color = AppColors.danger) }
             else if (state.edits.isEmpty() && state.shares.isEmpty()) item {
                 EmptyState(icon = AppIcons.Book, title = "还没有草稿", subtitle = "编辑笔记或分享内容到本应用后，可在这里继续处理")
             }
@@ -110,15 +149,15 @@ fun DraftsScreen(
                 DraftCard(
                     title = draft.path.substringAfterLast('/'),
                     detail = "${draft.repoId} · ${draft.path}",
-                    text = draft.content,
+                    text = draft.preview,
                     updatedAt = draft.updatedAt,
                     action = "继续编辑",
                     onContinue = {
                         if (draft.repoId == state.repoId) onOpenEdit(draft.path)
                         else onShowSnackbar("请先在设置中连接 ${draft.repoId}，也可以先复制草稿")
                     },
-                    onCopy = { copy(draft.content) },
-                    onDiscard = { deletingEdit = draft },
+                    onCopy = { viewModel.copy(draft, null, ::copy, onShowSnackbar) },
+                    onDiscard = { viewModel.prepareDiscard(draft, null, { e, share -> deletingEdit = e; deletingShare = share }, onShowSnackbar) },
                 )
             }
             if (state.shares.isNotEmpty()) item { Text("分享收集 · ${state.shares.size}", style = AppTypography.rowTitleSmall) }
@@ -126,12 +165,12 @@ fun DraftsScreen(
                 DraftCard(
                     title = draft.name.ifBlank { "快速收集" },
                     detail = draft.folder.ifBlank { "根目录" },
-                    text = draft.text,
+                    text = draft.preview,
                     updatedAt = draft.updatedAt,
                     action = "继续处理",
                     onContinue = { onOpenCapture(draft.id) },
-                    onCopy = { copy(draft.text) },
-                    onDiscard = { deletingShare = draft },
+                    onCopy = { viewModel.copy(null, draft, ::copy, onShowSnackbar) },
+                    onDiscard = { viewModel.prepareDiscard(null, draft, { e, share -> deletingEdit = e; deletingShare = share }, onShowSnackbar) },
                 )
             }
             item { Text("", Modifier.padding(bottom = 16.dp)) }

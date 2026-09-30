@@ -18,6 +18,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,6 +49,12 @@ import com.obsidiancompanion.feature.files.createWriteErrorMessage
 import com.obsidiancompanion.feature.files.isWindowsHostileSegment
 import com.obsidiancompanion.feature.files.sanitizeNoteName
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 
 /** 分享内容预览的最大字符数（超出显示省略号；保存不受此限）。 */
@@ -120,33 +130,6 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
     var targetRepo by mutableStateOf<String?>(null)
         private set
 
-    init {
-        draftId?.let(AppGraph.captureDraft::find)?.let { draft ->
-            sharedText = draft.text
-            nameField = TextFieldValue(draft.name, TextRange(draft.name.length))
-            folderField = TextFieldValue(draft.folder)
-        }
-        viewModelScope.launch { targetRepo = AppGraph.settings.flow.first().repoId }
-    }
-
-    fun onNameChange(value: TextFieldValue) {
-        if (inFlight) return
-        val changed = nameField.text != value.text
-        nameField = value
-        if (changed) persistDraft()
-    }
-
-    fun onFolderChange(value: TextFieldValue) {
-        if (inFlight) return
-        val changed = folderField.text != value.text
-        folderField = value
-        if (changed) persistDraft()
-    }
-
-    private fun persistDraft() {
-        draftId?.let { AppGraph.captureDraft.update(it, nameField.text, folderField.text) }
-    }
-
     /** 离线点击保存的提示（与错误语气区分）：内容已在本机，允许退出。 */
     var offlineNotice by mutableStateOf<String?>(null)
         private set
@@ -156,66 +139,133 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
     var saveError by mutableStateOf<String?>(null)
         private set
 
-    fun save(onSaved: (String) -> Unit) {
-        if (inFlight) return
-        offlineNotice = null
-        saveError = null
-        // 进程被杀后返回栈恢复时暂存已空 —— 不允许把空内容存成笔记
-        if (sharedText.isBlank()) {
-            saveError = "分享内容已失效，请重新分享"
-            return
-        }
-        val fileName = sanitizeNoteName(nameField.text)
-        if (fileName == null) {
-            saveError = "名字不可用：不能为空，不含 / \\ :，也不以 . 开头"
-            return
-        }
-        val folder = sanitizeCaptureFolder(folderField.text)
-        if (folder == null) {
-            saveError = "文件夹路径不可用：用 / 分层，段名不以 . 开头"
-            return
-        }
-        if (!AppGraph.network.isOnline) {
-            // 草稿已落盘：离线不阻塞，允许退出，联网后从首页入口接着上传
-            offlineNotice = "当前离线 —— 内容已保存本机，联网后再点保存即可上传"
-            return
-        }
-        val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
-        val uploadedDraft = draftId?.let(AppGraph.captureDraft::find)
-        if (uploadedDraft == null) {
-            saveError = "这条草稿已被删除，请返回草稿中心"
-            return
-        }
-        if (targetRepo == null) {
-            saveError = "请先连接 GitHub 仓库"
-            return
-        }
-        inFlight = true
-        viewModelScope.launch {
-            try {
-                when (val r = AppGraph.noteRepository.createNote(path, uploadedDraft.text)) {
-                    is NoteSaveResult.Saved -> {
-                        AppGraph.captureDraft.clearIfUnchanged(uploadedDraft)
-                        // 写操作后远端 Tree 必变：绕过 freshness window 强制补齐整树（如新目录的 DIRECTORY 行）
-                        AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
-                        onSaved(fileName)
-                    }
-                    is NoteSaveResult.Conflict -> {
-                        saveError = "同名笔记已存在，换个名字或文件夹吧"
-                    }
-                    is NoteSaveResult.Error -> {
-                        saveError = createWriteErrorMessage(
-                            r.error,
-                            offline = "当前离线，内容已保存在本机，联网后再试",
-                            fallback = "保存失败，请稍后再试",
-                        )
-                    }
-                }
-            } finally {
-                inFlight = false
+    var loading by mutableStateOf(true)
+        private set
+    private var pendingWrite: Job? = null
+    private val loadJob = viewModelScope.launch {
+        try {
+            draftId?.let { AppGraph.captureDraft.find(it) }?.let { draft ->
+                sharedText = draft.text
+                nameField = TextFieldValue(draft.name, TextRange(draft.name.length))
+                folderField = TextFieldValue(draft.folder)
+            }
+            targetRepo = AppGraph.settings.flow.first().repoId
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { saveError = "草稿读取失败，请返回后重试" }
+        finally { loading = false }
+    }
+
+    fun onNameChange(value: TextFieldValue) {
+        if (inFlight || loading) return
+        val changed = nameField.text != value.text
+        nameField = value
+        if (changed) persistDraft()
+    }
+
+    fun onFolderChange(value: TextFieldValue) {
+        if (inFlight || loading) return
+        val changed = folderField.text != value.text
+        folderField = value
+        if (changed) persistDraft()
+    }
+
+    private fun persistDraft() {
+        val id = draftId ?: return
+        val name = nameField.text
+        val folder = folderField.text
+        pendingWrite?.cancel()
+        // 合并快速输入；进程 scope 保证页面被导航销毁时已排队的写入仍可完成。
+        pendingWrite = AppGraph.appScope.launch {
+            delay(250)
+            try { AppGraph.captureDraft.update(id, name, folder) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                withContext(Dispatchers.Main) { saveError = "改名或目录暂存失败，请重试" }
             }
         }
     }
+
+    private suspend fun flushDraft() {
+        loadJob.join()
+        pendingWrite?.cancelAndJoin()
+        val id = draftId ?: return
+        AppGraph.captureDraft.update(id, nameField.text, folderField.text)
+    }
+
+    fun onBackground() {
+        if (!loading && !inFlight) {
+            val previous = pendingWrite
+            previous?.cancel()
+            val name = nameField.text
+            val folder = folderField.text
+            pendingWrite = AppGraph.appScope.launch {
+                try {
+                    previous?.join()
+                    draftId?.let { AppGraph.captureDraft.update(it, name, folder) }
+                }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { withContext(Dispatchers.Main) { saveError = "草稿暂存失败，请重试" } }
+            }
+        }
+    }
+
+    fun leave(onLeave: () -> Unit) {
+        if (inFlight) return
+        inFlight = true
+        viewModelScope.launch {
+            try { flushDraft(); onLeave() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { saveError = "草稿保存失败，请稍后重试或先复制内容" }
+            finally { inFlight = false }
+        }
+    }
+
+    fun save(onSaved: (String) -> Unit) {
+        if (inFlight || loading) return
+        offlineNotice = null
+        saveError = null
+        if (sharedText.isBlank()) { saveError = "分享内容已失效，请返回草稿中心"; return }
+        val fileName = sanitizeNoteName(nameField.text)
+        if (fileName == null) { saveError = "名字不可用：不能为空，不含 / \\ :，也不以 . 开头"; return }
+        val folder = sanitizeCaptureFolder(folderField.text)
+        if (folder == null) { saveError = "文件夹路径不可用：用 / 分层，段名不以 . 开头"; return }
+        if (targetRepo == null) { saveError = "请先连接 GitHub 仓库"; return }
+        val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
+        inFlight = true
+        viewModelScope.launch {
+            try {
+                flushDraft()
+                val uploadedDraft = draftId?.let { AppGraph.captureDraft.find(it) }
+                if (uploadedDraft == null) { saveError = "这条草稿已被删除，请返回草稿中心"; return@launch }
+                if (!AppGraph.network.isOnline) {
+                    offlineNotice = "当前离线 —— 内容已保存本机，联网后再点保存即可上传"
+                    return@launch
+                }
+                when (val r = AppGraph.noteRepository.createNote(path, uploadedDraft.text)) {
+                    is NoteSaveResult.Saved -> {
+                        try {
+                            if (!AppGraph.captureDraft.clearIfUnchanged(uploadedDraft)) {
+                                saveError = "已上传到 GitHub，本机草稿发生变化，已保留供核对"
+                                return@launch
+                            }
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) {
+                            saveError = "已上传到 GitHub，但本机草稿清理失败，请核对后从草稿中心丢弃"
+                            return@launch
+                        }
+                        AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
+                        onSaved(fileName)
+                    }
+                    is NoteSaveResult.Conflict -> saveError = "同名笔记已存在，换个名字或文件夹吧"
+                    is NoteSaveResult.Error -> saveError = createWriteErrorMessage(r.error,
+                        offline = "当前离线，内容已保存在本机，联网后再试", fallback = "保存失败，请稍后再试")
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { saveError = "保存失败，草稿仍保留，请稍后再试" }
+            finally { inFlight = false }
+        }
+    }
+
 }
 
 @Composable
@@ -224,8 +274,16 @@ fun QuickCaptureScreen(
     onShowSnackbar: (String) -> Unit,
     viewModel: QuickCaptureViewModel = viewModel(),
 ) {
-    BackHandler(enabled = viewModel.inFlight) {
-        onShowSnackbar("正在保存，请稍候")
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.onBackground()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    BackHandler {
+        if (viewModel.inFlight) onShowSnackbar("正在保存，请稍候") else viewModel.leave(onLeave)
     }
     Column(Modifier.fillMaxSize()) {
         // 顶栏：返回后本机草稿仍保留，上传期间等待请求结束。
@@ -241,7 +299,7 @@ fun QuickCaptureScreen(
                 icon = AppIcons.Back,
                 contentDescription = "返回",
                 onClick = {
-                    if (viewModel.inFlight) onShowSnackbar("正在保存，请稍候") else onLeave()
+                    if (viewModel.inFlight) onShowSnackbar("正在保存，请稍候") else viewModel.leave(onLeave)
                 },
             )
             Text("保存分享内容", style = AppTypography.appBarTitle)
@@ -257,6 +315,7 @@ fun QuickCaptureScreen(
         ) {
             Text("上传到：${viewModel.targetRepo ?: "正在读取仓库配置…"}", style = AppTypography.caption, color = AppColors.textTertiary)
             Text("返回后草稿仍保留，可从首页草稿中心继续处理", style = AppTypography.caption, color = AppColors.textTertiary)
+            if (viewModel.loading) Text("正在读取草稿…", style = AppTypography.caption)
             // 分享内容预览（只读）
             Text("内容", style = AppTypography.caption, color = AppColors.textTertiary)
             Box(
@@ -283,7 +342,7 @@ fun QuickCaptureScreen(
                 value = viewModel.nameField,
                 onValueChange = viewModel::onNameChange,
                 placeholder = "笔记名（自动补 .md）",
-                enabled = !viewModel.inFlight,
+                enabled = !viewModel.inFlight && !viewModel.loading,
             )
 
             Text("文件夹", style = AppTypography.caption, color = AppColors.textTertiary)
@@ -291,7 +350,7 @@ fun QuickCaptureScreen(
                 value = viewModel.folderField,
                 onValueChange = viewModel::onFolderChange,
                 placeholder = "留空保存在根目录，如 Inbox 或 收集/网页",
-                enabled = !viewModel.inFlight,
+                enabled = !viewModel.inFlight && !viewModel.loading,
             )
 
             viewModel.saveError?.let {
@@ -310,7 +369,7 @@ fun QuickCaptureScreen(
                         onLeave()
                     }
                 },
-                enabled = !viewModel.inFlight,
+                enabled = !viewModel.inFlight && !viewModel.loading,
                 block = true,
             )
         }

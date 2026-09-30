@@ -1,5 +1,6 @@
 package com.obsidiancompanion.data.metadata
 
+import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
@@ -9,6 +10,7 @@ import com.obsidiancompanion.data.metadata.entities.RecentSearchEntity
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.PendingEditEntity
+import com.obsidiancompanion.data.metadata.entities.CaptureDraftEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -171,6 +173,63 @@ class MetadataDaoTest {
         assertEquals(changed, dao.get(older.repoId, older.path))
         assertEquals(1, dao.deleteIfUnchanged(changed.repoId, changed.path, changed.baseSha, changed.content, changed.updatedAt))
         assertEquals(listOf(newer), dao.observeAll().first())
+    }
+
+    @Test
+    fun draftQueriesOnlyReturnShortPreviewsAndMetadataUpdatesKeepBody() = runTest {
+        val captures = db.captureDraftDao()
+        val body = "😀正文".repeat(10_000)
+        val row = CaptureDraftEntity("one", body, "old", "", 100L)
+        captures.insert(row)
+        assertEquals(1, captures.observeCount().first())
+        val preview = captures.observeSummaries().first().single().preview
+        assertEquals(160, preview.codePointCount(0, preview.length))
+        assertTrue(body.startsWith(preview))
+        captures.update(row.id, "old", "", 200L)
+        assertEquals(row, captures.get(row.id))
+        captures.update(row.id, "new", "Inbox", 300L)
+        assertEquals(body, captures.get(row.id)!!.text)
+        assertEquals(0, captures.deleteIfUnchanged(row.id, row.text, row.name, row.folder, row.updatedAt))
+        val changed = captures.get(row.id)!!
+        assertEquals(1, captures.deleteIfUnchanged(changed.id, changed.text, changed.name, changed.folder, changed.updatedAt))
+        assertEquals(0, captures.update(row.id, "new", "", 400L))
+        db.pendingEditDao().upsert(PendingEditEntity("o/r", "A.md", "sha", body, 1L))
+        assertEquals(1, db.pendingEditDao().observeCount().first())
+        assertEquals(preview, db.pendingEditDao().observeSummaries().first().single().preview)
+    }
+
+    @Test
+    fun migrationFromVersion2KeepsFavoritesSearchTreeAndPendingEdits() = runTest {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "migration-perf-test.db"
+        context.deleteDatabase(name)
+        try {
+            // v2 与 v3 的既有表结构相同；移除新增表并降为 v2，走真实 Room 升级和 schema 验证。
+            Room.databaseBuilder(context, AppDatabase::class.java, name).build().let { old ->
+                try {
+                    old.repoEntryDao().insertAll(listOf(entry("o/r", "A.md", "sha")))
+                    old.noteMetadataDao().setFavorite("o/r", "A.md", true)
+                    old.recentSearchDao().record("o/r", "keyword", 2L)
+                    old.pendingEditDao().upsert(PendingEditEntity("o/r", "A.md", "sha", "edited", 3L))
+                } finally { old.close() }
+            }
+            SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { old ->
+                old.execSQL("DROP TABLE capture_drafts")
+                old.version = 2
+            }
+            Room.databaseBuilder(context, AppDatabase::class.java, name)
+                .addMigrations(AppDatabase.MIGRATION_2_3).build().let { upgraded ->
+                    try {
+                        assertEquals("sha", upgraded.repoEntryDao().get("o/r", "A.md")!!.blobSha)
+                        assertTrue(upgraded.noteMetadataDao().observeOne("o/r", "A.md").first()!!.isFavorite)
+                        assertEquals("keyword", upgraded.recentSearchDao().observeRecent("o/r", 10).first().single().query)
+                        assertEquals("edited", upgraded.pendingEditDao().get("o/r", "A.md")!!.content)
+                        assertEquals(0, upgraded.captureDraftDao().observeCount().first())
+                        upgraded.captureDraftDao().insert(CaptureDraftEntity("one", "body", "name", "", 4L))
+                        assertEquals(1, upgraded.captureDraftDao().observeCount().first())
+                    } finally { upgraded.close() }
+                }
+        } finally { context.deleteDatabase(name) }
     }
 
     private fun entry(repoId: String, path: String, sha: String, kind: EntryKind = EntryKind.MARKDOWN) =

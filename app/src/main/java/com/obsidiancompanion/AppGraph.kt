@@ -79,7 +79,7 @@ object AppGraph {
 
     /** 分享收集本机草稿（多条）：收到分享即落盘，上传成功清除 —— 见 QuickCaptureViewModel / CaptureDraftStore。 */
     val captureDraft: com.obsidiancompanion.data.capture.CaptureDraftStore by lazy {
-        com.obsidiancompanion.data.capture.CaptureDraftStore(appContext!!)
+        com.obsidiancompanion.data.capture.CaptureDraftStore(appContext!!, database.captureDraftDao())
     }
 
     @Volatile
