@@ -4,9 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
@@ -18,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -28,7 +30,7 @@ import com.obsidiancompanion.core.design.AppTypography
 
 /**
  * 三态按钮 —— 原型 .btn / .btn-pri / .btn-sec / .btn-ghost / .btn-sm / .btn-block。
- * 高度 46dp（small 38dp），圆角 8dp（注意不是 12dp）。
+ * 最小高度 46dp（small 38dp），随大字体扩展，圆角 8dp。
  */
 
 @Composable
@@ -114,18 +116,19 @@ private fun BaseButton(
     Row(
         modifier = modifier
             .then(if (block) Modifier.fillMaxWidth() else Modifier)
-            .height(if (small) 38.dp else 46.dp)
+            .heightIn(min = if (small) 38.dp else 46.dp)
             .clip(shape)
-            .background(container)
-            .then(if (ring != null) Modifier.border(1.dp, ring, shape) else Modifier)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = if (small) 14.dp else horizontalPadding),
+            .background(if (enabled || container == Color.Transparent) container else AppColors.surfaceWarm)
+            .then(if (ring != null) Modifier.border(1.dp, if (enabled) ring else AppColors.borderStrong, shape) else Modifier)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = if (small) 14.dp else horizontalPadding, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
         Text(
             text = text,
             style = if (small) AppTypography.bodyMedium.copy(fontSize = 14.sp) else AppTypography.bodyMedium,
-            color = if (enabled) content else content.copy(alpha = 0.5f),
+            color = if (enabled) content else AppColors.textMeta,
         )
     }
 }
@@ -144,10 +147,10 @@ fun AppIconButton(
         modifier = modifier
             .size(44.dp)
             .clip(AppShapes.small)
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(iconSize))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(iconSize))
     }
 }

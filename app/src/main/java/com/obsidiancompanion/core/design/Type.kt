@@ -53,7 +53,7 @@ object AppTypography {
 
     // ── 组件字号 ──────────────────────────────────────────────
     val chipText = TextStyle(fontFamily = AppFonts.body, fontSize = 12.5.sp)
-    val bottomNavLabel = TextStyle(fontFamily = AppFonts.body, fontSize = 10.5.sp)
+    val bottomNavLabel = TextStyle(fontFamily = AppFonts.body, fontSize = 12.sp, lineHeight = 16.sp)
     val badgeText = TextStyle(fontFamily = AppFonts.body, fontSize = 10.5.sp)
     val fileBadge = TextStyle(fontFamily = AppFonts.mono, fontSize = 11.5.sp)                      // 冲突副本文件名 badge
 

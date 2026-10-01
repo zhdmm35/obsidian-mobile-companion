@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -31,7 +33,6 @@ import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
-import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SectionHeader
 import com.obsidiancompanion.core.ui.fadeUp
 import com.obsidiancompanion.feature.sync.SyncStatusChip
@@ -78,7 +79,7 @@ fun HomeScreen(
 
         if (state.isOffline) OfflineBanner()
 
-        // 搜索入口（原型 .sfield：46dp 假搜索框）
+        // 搜索入口：与搜索页同为 48dp，保留暖白底。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -88,7 +89,7 @@ fun HomeScreen(
                     top = AppSpacing.sm,
                     bottom = AppSpacing.xs,
                 )
-                .height(46.dp)
+                .height(48.dp)
                 .clip(AppShapes.medium)
                 .background(AppColors.surface)
                 .clickable(onClick = onOpenSearch)
@@ -101,45 +102,45 @@ fun HomeScreen(
         }
 
         // 草稿中心入口始终可见，方便新用户发现本机暂存内容。
-        run {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = AppSpacing.screenPaddingHorizontal,
-                        end = AppSpacing.screenPaddingHorizontal,
-                        top = AppSpacing.xs,
-                    )
-                    .clip(AppShapes.medium)
-                    .background(AppColors.surface)
-                    .border(1.dp, AppColors.borderStrong, AppShapes.medium)
-                    .clickable(onClick = onOpenDrafts)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Icon(AppIcons.Share, contentDescription = null, tint = AppColors.accent, modifier = Modifier.size(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("草稿中心", style = AppTypography.rowTitleSmall)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = AppSpacing.screenPaddingHorizontal,
+                    end = AppSpacing.screenPaddingHorizontal,
+                    top = AppSpacing.xs,
+                )
+                .clip(AppShapes.medium)
+                .background(AppColors.surface)
+                .border(1.dp, AppColors.borderStrong, AppShapes.medium)
+                .clickable(onClick = onOpenDrafts)
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(AppIcons.Share, contentDescription = null, tint = if (draftCount == 0) AppColors.textTertiary else AppColors.accent, modifier = Modifier.size(16.dp))
+            Column(Modifier.weight(1f)) {
+                Text("草稿中心", style = AppTypography.rowTitleSmall)
+                if (draftCount != 0) {
                     Text(
-                        if (draftCount < 0) "草稿读取失败，点击查看" else if (draftCount == 0) "编辑与分享草稿都在这里" else "$draftCount 条待处理草稿",
+                        if (draftCount < 0) "草稿读取失败，点击查看" else "$draftCount 条待处理草稿",
                         style = AppTypography.caption,
                         color = AppColors.textTertiary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
             }
+            Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
         }
 
         // 最近修改 = 检测到的远端变化（§22/§23：首次索引后为空是自然状态，不伪造数据）
         SectionHeader("最近修改")
         if (state.recentModified.isEmpty()) {
-            EmptyState(
+            HomeEmptyHint(
                 icon = AppIcons.Refresh,
-                title = "还没有最近更新记录",
-                subtitle = "在电脑上修改笔记并刷新后，更新会出现在这里",
+                text = "暂无更新记录，电脑修改笔记后刷新即可查看",
             )
         } else {
             DividerList(state.recentModified) { note ->
@@ -150,10 +151,9 @@ fun HomeScreen(
         // 最近阅读
         SectionHeader("最近阅读")
         if (state.recentRead.isEmpty()) {
-            EmptyState(
+            HomeEmptyHint(
                 icon = AppIcons.Book,
-                title = "还没有阅读记录",
-                subtitle = "打开一篇笔记，就会出现在这里",
+                text = "打开一篇笔记后，阅读记录会出现在这里",
             )
         } else {
             DividerList(state.recentRead) { note ->
@@ -194,6 +194,21 @@ fun HomeScreen(
                 Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
             }
         }
+    }
+}
+
+/** 首页分区内的紧凑提示；长文字自然换行，保留完整说明。 */
+@Composable
+private fun HomeEmptyHint(icon: ImageVector, text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+    ) {
+        Icon(icon, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(18.dp))
+        Text(text, style = AppTypography.caption, color = AppColors.textTertiary, modifier = Modifier.weight(1f))
     }
 }
 

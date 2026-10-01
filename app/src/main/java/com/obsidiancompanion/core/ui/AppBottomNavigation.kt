@@ -1,7 +1,6 @@
 package com.obsidiancompanion.core.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +10,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,10 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.obsidiancompanion.core.design.AppColors
-import com.obsidiancompanion.core.design.AppSpacing
+import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppTypography
 
 data class BottomNavItem(
@@ -30,7 +32,7 @@ data class BottomNavItem(
     val icon: ImageVector,
 )
 
-/** 底部导航（原型 .bnav：暖白底 + 顶部分隔线，4 tab，激活 fg/未激活 muted） */
+/** 底部导航：暖白底 + 顶部分隔线，选中项以淡陶土色底和字重标记。 */
 @Composable
 fun AppBottomNavigation(
     items: List<BottomNavItem>,
@@ -43,6 +45,7 @@ fun AppBottomNavigation(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .selectableGroup()
                 .navigationBarsPadding()
                 .padding(start = 6.dp, end = 6.dp, top = 6.dp),
         ) {
@@ -51,15 +54,23 @@ fun AppBottomNavigation(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onItemClick(item.route) }
-                        .padding(top = 8.dp, bottom = 2.dp),
+                        .selectable(selected = selected, role = Role.Tab, onClick = { onItemClick(item.route) })
+                        .padding(top = 4.dp, bottom = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Box(Modifier.height(24.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 40.dp, height = 28.dp)
+                            .background(
+                                if (selected) AppColors.accent.copy(alpha = 0.12f) else Color.Transparent,
+                                AppShapes.medium,
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Icon(
                             item.icon,
-                            contentDescription = item.label,
-                            tint = if (selected) AppColors.textPrimary else AppColors.textTertiary,
+                            contentDescription = null,
+                            tint = if (selected) AppColors.accent else AppColors.textTertiary,
                             modifier = Modifier.size(24.dp),
                         )
                     }
@@ -68,7 +79,7 @@ fun AppBottomNavigation(
                         text = item.label,
                         style = AppTypography.bottomNavLabel,
                         color = if (selected) AppColors.textPrimary else AppColors.textTertiary,
-                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                     )
                 }
             }

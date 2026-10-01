@@ -1,11 +1,14 @@
 package com.obsidiancompanion.feature.search
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,10 +37,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -49,6 +56,7 @@ import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
+import com.obsidiancompanion.core.design.AppTheme
 import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.AppChip
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
@@ -201,11 +209,11 @@ fun SearchScreen(
     onOpenNote: (String) -> Unit,
     viewModel: SearchViewModel = viewModel(),
 ) {
-    val focusRequester = androidx.compose.runtime.remember { FocusRequester() }
+    val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
     val results = viewModel.results
     // 正文命中与文件名命中同篇去重：文件名区已能到达的笔记不再重复展示；
-    // remember 避免每次重组重算 O(n×m) 过滤
+    // HashSet 将去重降为线性扫描；remember 避免无关重组时重算。
     val contentMatches = remember(results, viewModel.contentResults) {
         val filenamePaths = results.mapTo(HashSet()) { it.path }
         viewModel.contentResults.filter { it.entry.path !in filenamePaths }
@@ -221,15 +229,15 @@ fun SearchScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             AppIconButton(icon = AppIcons.Back, contentDescription = "返回", onClick = onBack)
-            // 搜索输入框（原型 .sfield-in：44dp / 暖白底 / 描边 / 自动聚焦）
+            // 搜索输入框：48dp，容纳完整的清空按钮点击范围。
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp)
+                    .height(48.dp)
                     .clip(AppShapes.medium)
                     .background(AppColors.surface)
                     .border(1.dp, AppColors.borderStrong, AppShapes.medium)
-                    .padding(horizontal = 12.dp),
+                    .padding(start = 12.dp, end = if (viewModel.query.isEmpty()) 12.dp else 0.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -257,15 +265,14 @@ fun SearchScreen(
                     )
                 }
                 if (viewModel.query.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .clip(AppShapes.pill)
-                            .clickable(onClick = viewModel::clear),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(AppIcons.Close, contentDescription = "清空", tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
-                    }
+                    AppIconButton(
+                        icon = AppIcons.Close,
+                        contentDescription = "清空",
+                        onClick = viewModel::clear,
+                        modifier = Modifier.size(48.dp),
+                        tint = AppColors.textMeta,
+                        iconSize = 16.dp,
+                    )
                 }
             }
         }
@@ -278,19 +285,7 @@ fun SearchScreen(
                     .padding(bottom = AppSpacing.screenBottomPadding),
             ) {
                 if (viewModel.recentQueries.isNotEmpty()) {
-                    SectionHeader("最近搜索")
-                    Row(
-                        modifier = Modifier.padding(
-                            start = AppSpacing.screenPaddingHorizontal,
-                            end = AppSpacing.screenPaddingHorizontal,
-                            top = 6.dp,
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
-                    ) {
-                        viewModel.recentQueries.take(6).forEach { recent ->
-                            AppChip(text = recent, onClick = { viewModel.applyRecent(recent) })
-                        }
-                    }
+                    RecentSearches(queries = viewModel.recentQueries, onSelect = viewModel::applyRecent)
                 }
                 EmptyState(
                     icon = AppIcons.Search,
@@ -316,6 +311,14 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = AppSpacing.screenBottomPadding),
                 ) {
+                    item(key = "search-scope") {
+                        Text(
+                            "正文仅搜索已缓存笔记",
+                            style = AppTypography.caption,
+                            color = AppColors.textTertiary,
+                            modifier = Modifier.padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.xs),
+                        )
+                    }
                     if (viewModel.searchingContent) item {
                         Text("正在搜索已缓存正文…", style = AppTypography.caption, color = AppColors.textTertiary,
                             modifier = Modifier.padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 8.dp))
@@ -324,74 +327,109 @@ fun SearchScreen(
                         item { SectionHeader("文件名匹配 · ${results.size}") }
                         itemsIndexed(results, key = { _, entry -> "n:${entry.path}" }) { index, entry ->
                             if (index > 0) AppHorizontalDivider()
-                            Row(
-                                // 不用 fadeUp：LazyColumn 行滚出/滚入会重置 remember，入场动画每次滚动都重放
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        viewModel.onResultOpened()
-                                        onOpenNote(entry.path)
-                                    }
-                                    .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Text(
-                                        entry.name.removeSuffix(".md"),
-                                        style = AppTypography.rowTitle,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        entry.path,
-                                        style = AppTypography.caption,
-                                        color = AppColors.textTertiary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
-                            }
+                            SearchResultRow(
+                                title = entry.name.removeSuffix(".md"),
+                                detail = entry.path,
+                                query = viewModel.query,
+                                contentMatch = false,
+                                onClick = {
+                                    viewModel.onResultOpened()
+                                    onOpenNote(entry.path)
+                                },
+                            )
                         }
                     }
                     if (contentMatches.isNotEmpty()) {
                         item { SectionHeader("正文匹配 · ${contentMatches.size}") }
                         itemsIndexed(contentMatches, key = { _, match -> "c:${match.entry.path}" }) { index, match ->
                             if (index > 0) AppHorizontalDivider()
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        viewModel.onResultOpened()
-                                        onOpenNote(match.entry.path)
-                                    }
-                                    .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Text(
-                                        match.entry.name.removeSuffix(".md"),
-                                        style = AppTypography.rowTitle,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    // 摘要代替路径：正文命中的区分度在内容本身
-                                    Text(
-                                        match.snippet,
-                                        style = AppTypography.caption,
-                                        color = AppColors.textTertiary,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
-                            }
+                            SearchResultRow(
+                                title = match.entry.name.removeSuffix(".md"),
+                                detail = match.snippet,
+                                query = viewModel.query,
+                                contentMatch = true,
+                                onClick = {
+                                    viewModel.onResultOpened()
+                                    onOpenNote(match.entry.path)
+                                },
+                            )
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RecentSearches(queries: List<String>, onSelect: (String) -> Unit) {
+    SectionHeader("最近搜索")
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(AppSpacing.sm),
+    ) {
+        queries.take(6).forEach { query ->
+            AppChip(text = query, onClick = { onSelect(query) })
+        }
+    }
+}
+
+/** 两类结果共用布局，高亮仅在文字、查询或主题颜色变化时重算。 */
+@Composable
+private fun SearchResultRow(
+    title: String,
+    detail: String,
+    query: String,
+    contentMatch: Boolean,
+    onClick: () -> Unit,
+) {
+    val matchColor = AppColors.calloutNoteTitle
+    val matchStyle = remember(matchColor) { SpanStyle(color = matchColor, fontWeight = FontWeight.SemiBold) }
+    val titleText = remember(title, query, matchStyle) { highlightSearchMatches(title, query, matchStyle) }
+    val detailText = remember(detail, query, contentMatch, matchStyle) {
+        if (contentMatch) highlightSearchMatches(detail, normalizeContentQuery(query), matchStyle) else AnnotatedString(detail)
+    }
+    // LazyColumn 行回收时不重放入场动画。
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.listRowVertical),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.md),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(titleText, style = AppTypography.rowTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(
+                detailText,
+                style = AppTypography.caption,
+                color = AppColors.textTertiary,
+                maxLines = if (contentMatch) 2 else 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
+    }
+}
+
+@Preview(name = "搜索结果 · 小屏", showBackground = true, widthDp = 320)
+@Preview(name = "搜索结果 · 深色", showBackground = true, widthDp = 320, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun SearchResultsPreview() {
+    AppTheme {
+        Column(Modifier.fillMaxSize().background(AppColors.background)) {
+            RecentSearches(
+                queries = listOf("同步", "知识库", "git rebase", "一条用于检查小屏幕换行和省略的较长搜索关键词", "TODO", "阅读笔记"),
+                onSelect = {},
+            )
+            SectionHeader("文件名匹配")
+            SearchResultRow("知识库同步方案与移动端离线阅读的长标题示例", "工作/知识管理/同步方案.md", "同步", false, {})
+            SectionHeader("正文匹配")
+            SearchResultRow("每周回顾", "先完成笔记同步，再检查离线内容；同步状态会显示在首页。", "同步", true, {})
         }
     }
 }

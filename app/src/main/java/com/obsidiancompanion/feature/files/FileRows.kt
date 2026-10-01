@@ -25,7 +25,7 @@ import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
-import com.obsidiancompanion.core.ui.fadeUp
+import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.util.Format
@@ -38,8 +38,7 @@ fun FolderRow(entry: RepoEntryEntity, childCount: Int, status: String, onClick: 
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 13.dp)
-            .fadeUp(),
+            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -56,11 +55,13 @@ fun FolderRow(entry: RepoEntryEntity, childCount: Int, status: String, onClick: 
         }
         Text("$childCount 项", style = AppTypography.caption, color = AppColors.textMeta)
         androidx.compose.foundation.layout.Box {
-            Icon(
-                AppIcons.More,
+            AppIconButton(
+                icon = AppIcons.More,
                 contentDescription = "${entry.name}离线选项",
                 tint = AppColors.textMeta,
-                modifier = Modifier.size(24.dp).clickable { menuOpen = true },
+                onClick = { menuOpen = true },
+                modifier = Modifier.size(48.dp),
+                iconSize = 24.dp,
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(text = { Text("下载供离线阅读 / 重试") }, onClick = { menuOpen = false; onDownload() })
@@ -78,8 +79,7 @@ fun FileRow(entry: RepoEntryEntity, onClick: () -> Unit, modifier: Modifier = Mo
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 13.dp)
-            .fadeUp(),
+            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -108,8 +108,7 @@ fun AttachmentRow(entry: RepoEntryEntity, onClick: () -> Unit, modifier: Modifie
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 13.dp)
-            .fadeUp(),
+            .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

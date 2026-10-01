@@ -68,7 +68,7 @@ object AppPalettes {
         textPrimary = Color(0xFF141413),
         textSecondary = Color(0xFF3D3D3A),
         textTertiary = Color(0xFF5E5D59),
-        textMeta = Color(0xFF87867F),
+        textMeta = Color(0xFF706F67),        // 小字在羊皮纸 / 暖白底上保持清晰
         border = Color(0xFFF0EEE6),
         borderStrong = Color(0xFFE8E6DC),   // 与 SurfaceWarm 同值不同语义
         accent = Color(0xFFC96442),         // terracotta 唯一品牌色
@@ -100,7 +100,7 @@ object AppPalettes {
         textPrimary = Color(0xFFEDEAE1),
         textSecondary = Color(0xFFC7C4BA),
         textTertiary = Color(0xFFA09D93),
-        textMeta = Color(0xFF79776E),
+        textMeta = Color(0xFF969389),        // 暗面辅助文字提亮，保留暖灰层级
         border = Color(0xFF302D27),
         borderStrong = Color(0xFF3E3B33),
         accent = Color(0xFFD3704C),         // terracotta 提亮一档，保暗底对比

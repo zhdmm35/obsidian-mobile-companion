@@ -15,7 +15,7 @@ data class ContentMatch(
 private val WS_RUN = Regex("\\s+")
 
 /** query 规范化：去首尾空白 + 连续空白折叠为单空格（与正文折叠同规则，对称匹配）。 */
-private fun normalizeQuery(query: String): String = query.trim().replace(WS_RUN, " ")
+internal fun normalizeContentQuery(query: String): String = query.trim().replace(WS_RUN, " ")
 
 /**
  * 正文搜索（§27 扩展）：大小写不敏感子串命中（与文件名同规则，CJK 天然支持），
@@ -28,7 +28,7 @@ private fun normalizeQuery(query: String): String = query.trim().replace(WS_RUN,
 private val matchOrder = compareByDescending<ContentMatch> { it.count }.thenBy { it.entry.path }
 
 fun searchContents(snapshot: List<Pair<RepoEntryEntity, String>>, query: String): List<ContentMatch> {
-    val q = normalizeQuery(query)
+    val q = normalizeContentQuery(query)
     if (q.isEmpty()) return emptyList()
     return snapshot.mapNotNull { (entry, content) -> matchContent(entry, content, q) }.sortedWith(matchOrder)
 }
@@ -39,7 +39,7 @@ suspend fun searchCachedContents(
     query: String,
     loadContent: suspend (RepoEntryEntity) -> String?,
 ): List<ContentMatch> {
-    val q = normalizeQuery(query)
+    val q = normalizeContentQuery(query)
     if (q.isEmpty()) return emptyList()
     val context = currentCoroutineContext()
     val matches = mutableListOf<ContentMatch>()

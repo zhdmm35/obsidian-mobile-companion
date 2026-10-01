@@ -47,17 +47,27 @@ fun NoteListItem(
             Text(
                 text = note.title,
                 style = if (large) AppTypography.rowTitleLarge else AppTypography.rowTitle,
-                maxLines = 1,
+                maxLines = if (large) 2 else 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (large) {
-                Text(
-                    text = note.folder,
-                    style = AppTypography.caption,
-                    color = AppColors.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(AppSpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = note.folder,
+                        style = AppTypography.caption,
+                        color = AppColors.textTertiary,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (note.timeLabel != null) {
+                        Text(note.timeLabel, style = AppTypography.caption, color = AppColors.textMeta, maxLines = 1)
+                    }
+                }
             }
         }
         if (showStar) {
@@ -68,7 +78,7 @@ fun NoteListItem(
                 modifier = Modifier.size(13.dp),
             )
         }
-        if (note.timeLabel != null) {
+        if (!large && note.timeLabel != null) {
             Text(
                 text = note.timeLabel,
                 style = AppTypography.caption,

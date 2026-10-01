@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
@@ -292,11 +293,22 @@ private fun ReaderContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Icon(AppIcons.FileText, contentDescription = null, tint = AppColors.textTertiary, modifier = Modifier.size(13.dp))
-                        val meta = buildString {
-                            append(state.folder)
-                            if (state.changedLabel != null) append(" · 远端更新于 ${state.changedLabel}")
-                        }
-                        Text(meta, style = AppTypography.caption, color = AppColors.textTertiary)
+                        Text(
+                            state.folder,
+                            style = AppTypography.caption,
+                            color = AppColors.textTertiary,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (state.changedLabel != null) {
+                        Text(
+                            "远端更新于 ${state.changedLabel}",
+                            style = AppTypography.caption,
+                            color = AppColors.textMeta,
+                            modifier = Modifier.padding(top = AppSpacing.xs),
+                        )
                     }
                 }
                 // §49：离线 + 缓存 → 弱提示，不切 Error
