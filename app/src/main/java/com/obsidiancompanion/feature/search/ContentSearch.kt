@@ -14,8 +14,30 @@ data class ContentMatch(
 
 private val WS_RUN = Regex("\\s+")
 
+// 只构建一次字符表，沿用当前平台 Regex 的空白定义；避免 Android 逐个匹配替换的开销。
+private val whitespaceChars = BooleanArray(65_536).also { chars ->
+    val bmp = CharArray(chars.size) { it.toChar() }.concatToString()
+    WS_RUN.findAll(bmp).forEach { match -> match.range.forEach { chars[it] = true } }
+}
+
+internal fun collapseContentWhitespace(content: String, checkActive: () -> Unit = {}): String {
+    val flat = StringBuilder(content.length)
+    var inWhitespace = false
+    content.forEachIndexed { index, char ->
+        if (index % 4096 == 0) checkActive()
+        if (whitespaceChars[char.code]) {
+            if (!inWhitespace) flat.append(' ')
+            inWhitespace = true
+        } else {
+            flat.append(char)
+            inWhitespace = false
+        }
+    }
+    return flat.toString()
+}
+
 /** query 规范化：去首尾空白 + 连续空白折叠为单空格（与正文折叠同规则，对称匹配）。 */
-internal fun normalizeContentQuery(query: String): String = query.trim().replace(WS_RUN, " ")
+internal fun normalizeContentQuery(query: String): String = collapseContentWhitespace(query.trim())
 
 /**
  * 正文搜索（§27 扩展）：大小写不敏感子串命中（与文件名同规则，CJK 天然支持），
@@ -56,7 +78,7 @@ suspend fun searchCachedContents(
 
 private fun matchContent(entry: RepoEntryEntity, content: String, q: String,
     checkActive: () -> Unit = {}): ContentMatch? {
-    val flat = content.replace(WS_RUN, " ")
+    val flat = collapseContentWhitespace(content, checkActive)
     var first = -1
     var count = 0
     var idx = flat.indexOf(q, ignoreCase = true)

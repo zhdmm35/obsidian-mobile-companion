@@ -14,6 +14,7 @@ import com.obsidiancompanion.model.markdown.MdDocument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
+import androidx.room.withTransaction
 
 /** openNote 的结果（§49 语义）。 */
 sealed interface NoteOpenResult {
@@ -56,9 +57,9 @@ class NoteRepository(
     private val cache: ContentCache,
     private val settings: SettingsRepository,
     private val db: AppDatabase,
-) {
+) : EditorNoteStore {
 
-    suspend fun openNote(path: String): NoteOpenResult = withContext(Dispatchers.Default) {
+    override suspend fun openNote(path: String): NoteOpenResult = withContext(Dispatchers.Default) {
         val s = settings.flow.firstOrNull() ?: return@withContext NoteOpenResult.Error(DomainError.Unknown, null)
         val repoId = s.repoId ?: return@withContext NoteOpenResult.Error(DomainError.Unknown, null)
         val entry = index.getEntry(repoId, path)
@@ -72,7 +73,7 @@ class NoteRepository(
             return@withContext content(path, cached, fromCache = true, entry)
         }
 
-        when (val r = remote.getRawFile(s.owner!!, s.repo!!, path)) {
+        when (val r = remote.getRawBlob(s.owner!!, s.repo!!, entry.blobSha)) {
             is GitHubResult.Ok -> {
                 cache.put(entry.blobSha, r.value)
                 content(path, r.value, fromCache = false, entry)
@@ -140,7 +141,7 @@ class NoteRepository(
      * 保存已有 Markdown（§3/§6）：draft 暂存 → PUT(base sha) → 成功收敛 / 冲突与失败保留 draft。
      * baseSha 为编辑 session 进入时冻结的 blob SHA（§39），不是进入 Editor 后再查的「当前」值。
      */
-    suspend fun saveNote(path: String, baseSha: String, content: String): NoteSaveResult =
+    override suspend fun saveNote(path: String, baseSha: String, content: String): NoteSaveResult =
         withContext(Dispatchers.Default) {
             val ctx = writeContext() ?: return@withContext NoteSaveResult.Error(DomainError.Unknown)
             val entry = index.getEntry(ctx.repoId, path)
@@ -223,13 +224,13 @@ class NoteRepository(
         }
 
     /** Editor 进入时的崩溃/失败恢复检查（§21）。 */
-    suspend fun getPendingEdit(path: String): PendingEditEntity? {
+    override suspend fun getPendingEdit(path: String): PendingEditEntity? {
         val repoId = settings.flow.firstOrNull()?.repoId ?: return null
         return db.pendingEditDao().get(repoId, path)
     }
 
     /** 编辑中自动暂存（§21 扩展）：防抖写入 pending_edits，杀进程/切后台后内容仍可恢复。 */
-    suspend fun stagePendingEdit(path: String, baseSha: String, content: String) {
+    override suspend fun stagePendingEdit(path: String, baseSha: String, content: String) {
         val repoId = settings.flow.firstOrNull()?.repoId ?: return
         stageDraft(repoId, path, baseSha, content)
     }
@@ -244,12 +245,27 @@ class NoteRepository(
         }
     }
 
-    suspend fun clearPendingEdit(path: String) {
+    override suspend fun clearPendingEdit(path: String) {
         val repoId = settings.flow.firstOrNull()?.repoId ?: return
         db.pendingEditDao().delete(repoId, path)
     }
 
-    /** PUT → 成功：缓存新 SHA + entry 指向新 blob + 清 draft；409 → Conflict（draft 保留）；其余 → Error（draft 保留）。 */
+    override suspend fun getCachedContent(sha: String): String? = cache.get(sha)?.toString(Charsets.UTF_8)
+
+    suspend fun cacheStat(): ContentCache.Stat {
+        val repoId = settings.flow.firstOrNull()?.repoId
+        val shas = repoId?.let { db.repoEntryDao().getNoteShas(it) }.orEmpty()
+        return cache.stat(shas)
+    }
+
+    suspend fun trimObsoleteCache(): Long {
+        val protected = db.withTransaction {
+            (db.repoEntryDao().getReferencedShas() + db.pendingEditDao().getBaseShas()).toSet()
+        }
+        return cache.trimObsolete(protected)
+    }
+
+    /** PUT 成功后缓存与索引收敛；冲突或失败保留草稿。 */
     private suspend fun putAndConverge(
         ctx: WriteContext,
         path: String,

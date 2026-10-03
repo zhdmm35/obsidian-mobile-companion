@@ -37,6 +37,7 @@ object TreeDiff {
         old: List<RepoEntryEntity>,
         remote: RemoteTree,
         now: Long,
+        protectedPaths: Set<String> = emptySet(),
     ): Result {
         val firstLoad = old.isEmpty()
         val oldByPath = old.associateBy { it.path }
@@ -51,6 +52,11 @@ object TreeDiff {
             if (e.path.split('/').any { it.startsWith(".") }) return@forEach
 
             val previous = oldByPath[e.path]
+            if (previous != null && e.path in protectedPaths) {
+                entries += previous
+                unchanged++
+                return@forEach
+            }
             val observed = when {
                 previous == null -> if (firstLoad) null else now       // §23：首次加载全部 null
                 previous.blobSha != e.sha -> now                        // §22：检测到远端 SHA 变化
@@ -73,7 +79,11 @@ object TreeDiff {
         }
 
         val newPaths = entries.map { it.path }.toSet()
-        val deleted = oldByPath.keys.filter { it !in newPaths }
+        // 刷新期间保存/新建的条目保留本机版本，下一次快照再收敛。
+        val retained = old.filter { it.path in protectedPaths && it.path !in newPaths }
+        entries += retained
+        unchanged += retained.size
+        val deleted = oldByPath.keys.filter { it !in newPaths && it !in protectedPaths }
 
         return Result(
             entries = entries,

@@ -14,6 +14,35 @@ import kotlinx.coroutines.cancelAndJoin
 /** 搜索正文匹配：子串命中 / 计数 / 排序 / 摘要窗口（计数与摘要同在折叠文本上）。 */
 class ContentSearchTest {
 
+    @Test fun unicodeCaseMatching_keepsPlatformIgnoreCaseSemantics() {
+        val body = (0..65535).filter { !it.toChar().isSurrogate() }.joinToString("|") { it.toChar().toString() }
+        val flat = body.replace(Regex("\\s+"), " ")
+        for (query in listOf("i", "k", "s", "σ", "ǅ", "ß")) {
+            var count = 0
+            var index = flat.indexOf(query, ignoreCase = true)
+            while (index >= 0) {
+                count++
+                index = flat.indexOf(query, index + query.length, ignoreCase = true)
+            }
+            assertEquals(query, count, searchContents(snapshot("unicode.md" to body), query).single().count)
+        }
+    }
+
+    @Test fun supplementaryLettersAndEmoji_keepOriginalOffsetsAndCaseRules() {
+        val body = "before 𐐀 𐐨 😀 after"
+        for (query in listOf("𐐀", "𐐨", "😀")) {
+            val expected = mutableListOf<Int>()
+            var index = body.indexOf(query, ignoreCase = true)
+            while (index >= 0) {
+                expected += index
+                index = body.indexOf(query, index + query.length, ignoreCase = true)
+            }
+            val actual = searchContents(snapshot("emoji.md" to body), query).single()
+            assertEquals(expected.size, actual.count)
+            assertEquals(snippetWindow(body, expected.first(), query.length), actual.snippet)
+        }
+    }
+
     @Test fun streamingSearchPreservesResultsAndSkipsUncachedAndNonMarkdown() = runTest {
         val docs = snapshot("b.md" to "hit Hit", "a.md" to "hit", "c.md" to "no match")
         val uncached = entry("uncached.md")
@@ -47,6 +76,14 @@ class ContentSearchTest {
         job.cancelAndJoin()
         assertEquals(listOf("a.md"), loaded)
         assertTrue(!published)
+    }
+
+    @Test fun whitespaceCollapseMatchesRegexForEveryBmpCharacter() {
+        val input = (0..0xffff).filter { it !in 0xd800..0xdfff }
+            .joinToString("\t \n") { it.toChar().toString() }
+        assertEquals(input.replace(Regex("\\s+"), " "), collapseContentWhitespace(input))
+        assertEquals(" foo bar ", collapseContentWhitespace("\r\n foo\t\u000bbar\u000c "))
+        assertEquals("", collapseContentWhitespace(""))
     }
 
     /* ── fixtures ─────────────────────────────────────────── */

@@ -9,6 +9,7 @@ import com.obsidiancompanion.data.metadata.entities.RepositoryStateEntity
 import com.obsidiancompanion.data.settings.SettingsRepository
 import com.obsidiancompanion.model.DomainError
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -97,20 +98,18 @@ class RepositoryIndexRepository(
                 }
 
                 is GitHubResult.Ok -> {
-                    val old = db.repoEntryDao().getAll(repoId)
-                    val diff = TreeDiff.compute(repoId, old, r.value, now)
-                    // 并发本地写保护：这些 entry 是刷新进入后才收敛的（observedChangedAt 晚于水位线），
-                    // 本次 Tree 快照可能早于其提交 —— 不按快照判删，留给下一次刷新对齐
-                    val recentLocalWrites = old.mapNotNullTo(mutableSetOf()) { e ->
-                        e.path.takeIf { e.observedChangedAt?.let { it > enteredAtMs } == true }
-                    }
-                    val deletablePaths = diff.deletedPaths.filter { it !in recentLocalWrites }
-                    db.withTransaction {
+                    val diff = db.withTransaction {
+                        // 查询和合并放在同一事务，避免读取旧条目后再覆盖并发提交。
+                        val old = db.repoEntryDao().getAll(repoId)
+                        val recentLocalWrites = old.mapNotNullTo(mutableSetOf()) { e ->
+                            e.path.takeIf { e.observedChangedAt?.let { it >= enteredAtMs } == true }
+                        }
+                        val diff = TreeDiff.compute(repoId, old, r.value, now, recentLocalWrites)
                         // 增量入库：只写 Added/Changed/Deleted 行 —— 不再整表 delete+insert；
                         // 无变化的刷新对 repo_entries 零写入，Room 观察流不再被无意义重放
                         val upserts = diff.upsertEntries()
                         if (upserts.isNotEmpty()) db.repoEntryDao().insertAll(upserts)
-                        deletablePaths.chunked(DELETE_CHUNK).forEach { chunk ->
+                        diff.deletedPaths.chunked(DELETE_CHUNK).forEach { chunk ->
                             db.repoEntryDao().deleteByPaths(repoId, chunk)
                         }
                         db.repositoryStateDao().upsert(
@@ -125,6 +124,7 @@ class RepositoryIndexRepository(
                                 markdownCount = diff.entries.count { it.kind == com.obsidiancompanion.data.metadata.entities.EntryKind.MARKDOWN },
                             ),
                         )
+                        diff
                     }
                     RefreshOutcome.Success(diff, now)
                 }
@@ -135,10 +135,14 @@ class RepositoryIndexRepository(
             if (outcome !is RefreshOutcome.Failed) throttle.markSuccessAt(throttle.nowMs())
             _refreshUiState.value = RefreshUiState(refreshing = false, lastOutcome = outcome)
             outcome
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val outcome = RefreshOutcome.Failed(DomainError.Unknown, System.currentTimeMillis())
             _refreshUiState.value = RefreshUiState(refreshing = false, lastOutcome = outcome)
             outcome
+        } finally {
+            _refreshUiState.value = _refreshUiState.value.copy(refreshing = false)
         }
     }
 

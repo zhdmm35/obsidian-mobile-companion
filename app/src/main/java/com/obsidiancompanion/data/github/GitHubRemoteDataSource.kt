@@ -87,9 +87,15 @@ class GitHubRemoteDataSource(
 
     /** Raw 正文（Markdown 源文本字节）。路径按段编码（空格→%20，'/' 保留为分隔符）。 */
     suspend fun getRawFile(owner: String, repo: String, path: String): GitHubResult<ByteArray> =
+        readRaw { api.getRawContent(contentsUrl(owner, repo, path)) }
+
+    suspend fun getRawBlob(owner: String, repo: String, sha: String): GitHubResult<ByteArray> =
+        readRaw { api.getRawBlob(owner, repo, sha) }
+
+    private suspend fun readRaw(fetch: suspend () -> retrofit2.Response<okhttp3.ResponseBody>): GitHubResult<ByteArray> =
         withContext(Dispatchers.IO) {
             runGuarded {
-                val resp = api.getRawContent(contentsUrl(owner, repo, path))
+                val resp = fetch()
                 when {
                     resp.isSuccessful -> {
                         val bytes = resp.body()?.bytes()

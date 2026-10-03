@@ -67,7 +67,7 @@ class SettingsViewModel : ViewModel() {
     /** §60/§61：只清 Content Cache —— 不动 Token / 仓库选择 / Tree Cache / 收藏 / 阅读记录 / 搜索历史。 */
     fun clearCache(onDone: (String) -> Unit) {
         viewModelScope.launch {
-            val protected = AppGraph.database.pendingEditDao().getAll().map { it.baseSha }.toSet()
+            val protected = AppGraph.database.pendingEditDao().getBaseShas().toSet()
             AppGraph.contentCache.clearExcept(protected)
             refreshCacheStats()
             onDone("内容缓存已清理，未上传草稿已保留")
@@ -79,7 +79,7 @@ class SettingsViewModel : ViewModel() {
         viewModelScope.launch {
             val old = AppGraph.settings.flow.first()
             old.repoId?.let { AppGraph.indexRepository.clearRepositoryData(it) }
-            val protected = AppGraph.database.pendingEditDao().getAll().map { it.baseSha }.toSet()
+            val protected = AppGraph.database.pendingEditDao().getBaseShas().toSet()
             AppGraph.contentCache.clearExcept(protected)
             AppGraph.settings.clearRepository()
             onDone()

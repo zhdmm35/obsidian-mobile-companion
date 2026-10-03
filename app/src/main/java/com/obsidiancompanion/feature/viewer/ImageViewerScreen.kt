@@ -71,6 +71,8 @@ private const val MAX_DECODE_PX = 4096
 @Composable
 fun ImageViewerScreen(initialPath: String, onBack: () -> Unit) {
     // 同目录图片快照：取一次即可，翻看期间不追 live 更新（避免 Tree 刷新导致页码跳动）
+    // Compose 1.7.6 lint 未识别下方 value 赋值，仅豁免此调用。
+    @Suppress("ProduceStateDoesNotAssignValue")
     val pages by produceState<List<String>?>(initialValue = null, initialPath) {
         val repoId = AppGraph.settings.flow.firstOrNull()?.repoId
         value = if (repoId == null) {
@@ -147,6 +149,8 @@ private fun ViewerTopBar(title: String, counter: String?, onBack: () -> Unit) {
 
 @Composable
 private fun ViewerPage(path: String, onScaleChange: (Float) -> Unit, modifier: Modifier = Modifier) {
+    // Compose 1.7.6 lint 未识别下方 value 赋值，仅豁免此调用。
+    @Suppress("ProduceStateDoesNotAssignValue")
     val result by produceState<ImageResult?>(initialValue = null, path) {
         value = AppGraph.imageRepository.loadByPath(path)
     }

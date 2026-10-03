@@ -34,7 +34,7 @@ import com.obsidiancompanion.data.metadata.entities.RepositoryStateEntity
         CaptureDraftEntity::class,
     ],
     version = 3,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun repoEntryDao(): RepoEntryDao
@@ -53,7 +53,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /** v1 → v2：仅新增 pending_edits 表；既有 Tree / 收藏 / 最近阅读 / 最近搜索全部保留。 */
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        internal val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `pending_edits` (" +

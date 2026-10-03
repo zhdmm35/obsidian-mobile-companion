@@ -188,6 +188,8 @@ private fun ReaderContent(
     var sameNoteAnchor by remember { mutableStateOf<String?>(null) }
 
     // §15：渲染前批量解析本文全部 WikiLink，未解析的以 muted 色显示（点击仍给 Snackbar）
+    // Compose 1.7.6 lint 未识别下方 value 赋值，仅豁免此调用。
+    @Suppress("ProduceStateDoesNotAssignValue")
     val deadLinks by produceState<Set<String>>(emptySet(), state.document, state.path) {
         val repoId = AppGraph.settings.flow.firstOrNull()?.repoId ?: return@produceState
         // produceState 块跑在组合（主线程）上下文：遍历 AST + 逐链接内存扫描整体挪到 Default，

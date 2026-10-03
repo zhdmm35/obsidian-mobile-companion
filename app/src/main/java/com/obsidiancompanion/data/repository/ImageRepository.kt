@@ -75,7 +75,7 @@ class ImageRepository(
         val s = settings.flow.firstOrNull()
         val owner = s?.owner ?: return@withContext ImageResult.Missing
         val repo = s.repo ?: return@withContext ImageResult.Missing
-        when (val r = remote.getRawFile(owner, repo, found.path)) {
+        when (val r = remote.getRawBlob(owner, repo, found.blobSha)) {
             is GitHubResult.Ok -> {
                 cache.put(found.blobSha, r.value)
                 ImageResult.Ready(r.value, fromCache = false, path = found.path)

@@ -1,6 +1,14 @@
 package com.obsidiancompanion
 
 import android.content.Context
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.obsidiancompanion.feature.editor.EditorViewModel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.CancellationException
+import com.obsidiancompanion.data.repository.RefreshOutcome
 import com.obsidiancompanion.data.cache.ContentCache
 import com.obsidiancompanion.data.credentials.CredentialStore
 import com.obsidiancompanion.data.github.GitHubApi
@@ -43,6 +51,16 @@ object AppGraph {
     }
     val noteRepository: NoteRepository by lazy {
         NoteRepository(indexRepository, githubRemote, contentCache, settings, database)
+    }
+
+    val editorViewModelFactory by lazy {
+        viewModelFactory {
+            initializer {
+                EditorViewModel(noteRepository, { network.isOnline }) {
+                    appScope.launch { indexRepository.refreshTree() }
+                }
+            }
+        }
     }
 
     /**
@@ -96,5 +114,21 @@ object AppGraph {
         credentials = CredentialStore(app)
         network = NetworkMonitor(app)
         initialized = true
+        appScope.launch {
+            trimCacheSafely()
+            indexRepository.refreshUiState.map { it.lastOutcome }.distinctUntilChanged().collect { outcome ->
+                if (outcome is RefreshOutcome.Success || outcome is RefreshOutcome.NotModified) trimCacheSafely()
+            }
+        }
+    }
+
+    private suspend fun trimCacheSafely() {
+        try {
+            noteRepository.trimObsoleteCache()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("ContentCache", "旧版本缓存整理未完成：${e.javaClass.simpleName}")
+        }
     }
 }

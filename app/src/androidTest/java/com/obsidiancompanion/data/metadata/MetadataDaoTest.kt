@@ -1,7 +1,8 @@
 package com.obsidiancompanion.data.metadata
 
-import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
+import androidx.room.testing.MigrationTestHelper
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -20,11 +21,15 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.Rule
 import org.junit.runner.RunWith
 
 /** §74：收藏持久 / 最近阅读持久 / 最近搜索持久 / repo 作用域隔离 / Tree 刷新不碰用户 metadata。 */
 @RunWith(AndroidJUnit4::class)
 class MetadataDaoTest {
+
+    @get:Rule
+    val migrationHelper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), AppDatabase::class.java)
 
     private lateinit var db: AppDatabase
 
@@ -204,19 +209,8 @@ class MetadataDaoTest {
         val name = "migration-perf-test.db"
         context.deleteDatabase(name)
         try {
-            // v2 与 v3 的既有表结构相同；移除新增表并降为 v2，走真实 Room 升级和 schema 验证。
-            Room.databaseBuilder(context, AppDatabase::class.java, name).build().let { old ->
-                try {
-                    old.repoEntryDao().insertAll(listOf(entry("o/r", "A.md", "sha")))
-                    old.noteMetadataDao().setFavorite("o/r", "A.md", true)
-                    old.recentSearchDao().record("o/r", "keyword", 2L)
-                    old.pendingEditDao().upsert(PendingEditEntity("o/r", "A.md", "sha", "edited", 3L))
-                } finally { old.close() }
-            }
-            SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use { old ->
-                old.execSQL("DROP TABLE capture_drafts")
-                old.version = 2
-            }
+            seedHistoricalDatabase(name, 2)
+            migrationHelper.runMigrationsAndValidate(name, 3, true, AppDatabase.MIGRATION_2_3).close()
             Room.databaseBuilder(context, AppDatabase::class.java, name)
                 .addMigrations(AppDatabase.MIGRATION_2_3).build().let { upgraded ->
                     try {
@@ -230,6 +224,38 @@ class MetadataDaoTest {
                     } finally { upgraded.close() }
                 }
         } finally { context.deleteDatabase(name) }
+    }
+
+    @Test
+    fun migrationFromVersion1KeepsNotesAndCreatesDraftTables() = runTest {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "migration-v1-test.db"
+        context.deleteDatabase(name)
+        try {
+            seedHistoricalDatabase(name, 1)
+            migrationHelper.runMigrationsAndValidate(name, 3, true,
+                AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).close()
+            Room.databaseBuilder(context, AppDatabase::class.java, name)
+                .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build().let { upgraded ->
+                    try {
+                        assertEquals("sha", upgraded.repoEntryDao().get("o/r", "A.md")!!.blobSha)
+                        assertTrue(upgraded.noteMetadataDao().observeOne("o/r", "A.md").first()!!.isFavorite)
+                        upgraded.pendingEditDao().upsert(PendingEditEntity("o/r", "A.md", "sha", "body", 1L))
+                        assertEquals("body", upgraded.pendingEditDao().get("o/r", "A.md")!!.content)
+                        assertEquals(0, upgraded.captureDraftDao().observeCount().first())
+                    } finally { upgraded.close() }
+                }
+        } finally { context.deleteDatabase(name) }
+    }
+
+    /** 从固定 JSON 建旧库，未来修改当前 Entity 也不会改写测试的历史结构。 */
+    private fun seedHistoricalDatabase(name: String, version: Int) {
+        migrationHelper.createDatabase(name, version).use { old ->
+            old.execSQL("INSERT INTO repo_entries VALUES ('o/r', 'A.md', 'A.md', NULL, 'MARKDOWN', 'sha', 10, NULL)")
+            old.execSQL("INSERT INTO note_user_metadata VALUES ('o/r', 'A.md', NULL, 1)")
+            old.execSQL("INSERT INTO recent_searches VALUES ('o/r', 'keyword', 2)")
+            if (version >= 2) old.execSQL("INSERT INTO pending_edits VALUES ('o/r', 'A.md', 'sha', 'edited', 3)")
+        }
     }
 
     private fun entry(repoId: String, path: String, sha: String, kind: EntryKind = EntryKind.MARKDOWN) =

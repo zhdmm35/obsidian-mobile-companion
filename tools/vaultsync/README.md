@@ -10,7 +10,8 @@ Vault 文件变化后自动 commit + push，同时定时拉取手机推上来的
 - Node.js + chokidar 监听 Vault 文件变化，30s debounce（持续编辑时计时不断重置）。
 - 每 5 分钟 periodic 检查一次远端（即使本地无变化，也可能有手机推的新 commit）。
 - 所有触发方式（startup / watcher / periodic / manual）走同一个 `syncOnce()`，
-  进程内 Promise 锁保证同一时间只有一个 git 流程。
+  进程内 Promise 锁保证同一时间只有一个 git 流程。自动触发合并为最多一轮待执行同步；
+  运行期间的新变更仍会安排下一轮，手动同步各自保留独立结果。
 - Git 操作全部通过系统 `git` CLI（`child_process.execFile`），当前 branch 跟踪的
   upstream 从 `@{u}` 解析，不假设 `main`。
 - 流程：`status → 有修改则 add -A + commit → fetch → rebase @{u} → push`。

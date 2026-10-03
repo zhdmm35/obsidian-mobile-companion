@@ -18,6 +18,39 @@ class ContentCacheTest {
 
     private fun newCache(): ContentCache = ContentCache(tmp.newFolder())
 
+    @Test fun `note statistics exclude images and obsolete versions but count shared notes`() = runTest {
+        val cache = newCache()
+        cache.put("note111", "body".toByteArray())
+        cache.put("image22", byteArrayOf(1, 2))
+        cache.put("old3333", "old".toByteArray())
+        val stat = cache.stat(listOf("note111", "note111", "missing"))
+        assertEquals(2, stat.count)
+        assertEquals(9L, stat.bytes)
+    }
+
+    @Test fun `budget cleanup preserves current blobs draft bases and recent writes`() = runTest {
+        val folder = tmp.newFolder()
+        val cache = ContentCache(folder)
+        for (sha in listOf("current", "draft11", "old1111", "old2222", "recent1")) {
+            cache.put(sha, ByteArray(10))
+            if (sha != "recent1") java.io.File(folder, "${sha.take(2)}/${sha.drop(2)}").setLastModified(1L)
+        }
+        val remaining = cache.trimObsolete(setOf("current", "draft11"), maxBytes = 25, nowMs = System.currentTimeMillis())
+        assertEquals(30L, remaining)
+        assertTrue(cache.exists("current"))
+        assertTrue(cache.exists("draft11"))
+        assertTrue(cache.exists("recent1"))
+        assertFalse(cache.exists("old1111"))
+        assertFalse(cache.exists("old2222"))
+    }
+
+    @Test fun `below budget does not delete unreferenced cache`() = runTest {
+        val cache = newCache()
+        cache.put("old1111", ByteArray(10))
+        assertEquals(10L, cache.trimObsolete(emptySet(), maxBytes = 100))
+        assertTrue(cache.exists("old1111"))
+    }
+
     @Test
     fun `miss then put then hit`() = runTest {
         val cache = newCache()

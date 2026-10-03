@@ -241,6 +241,24 @@ class GitHubRemoteDataSourceTest {
     /* ── getRawFile ────────────────────────────────────────── */
 
     @Test
+    fun getRawBlob_readsImmutableVersionIncludingBinary() = runTest {
+        val bytes = byteArrayOf(0, 1, -1, 34)
+        server.enqueue(MockResponse().setBody(okio.Buffer().write(bytes)))
+        val result = remote.getRawBlob("o", "r", "abc123") as GitHubResult.Ok
+        org.junit.Assert.assertArrayEquals(bytes, result.value)
+        val request = server.takeRequest()
+        assertEquals("/repos/o/r/git/blobs/abc123", request.path)
+        assertEquals("application/vnd.github.raw+json", request.getHeader("Accept"))
+    }
+
+    @Test
+    fun getRawBlob_missingVersionDoesNotFallBackToBranch() = runTest {
+        server.enqueue(MockResponse().setResponseCode(404))
+        assertEquals(GitHubResult.Fail(DomainError.NotFound, 404), remote.getRawBlob("o", "r", "oldsha"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun getRawFile_ok() = runTest {
         server.enqueue(MockResponse().setBody("# Hello 世界"))
         val r = remote.getRawFile("o", "r", "工作/番禺.md")

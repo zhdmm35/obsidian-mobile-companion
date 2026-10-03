@@ -73,6 +73,24 @@ class NoteRepositoryWriteTest {
         db.repoEntryDao().insertAll(listOf(entry("abc123")))
     }
 
+    @Test fun cacheStatisticsCountOnlyCurrentRepositoryMarkdownEntries() = runTest {
+        val note = entry("abc123")
+        db.repoEntryDao().insertAll(listOf(
+            note.copy(path = "same.md", name = "same.md"),
+            note.copy(path = "image.png", kind = EntryKind.IMAGE, blobSha = "image123"),
+            note.copy(repoId = "other/repo", path = "other.md", blobSha = "other123"),
+        ))
+        cache.put("abc123", ByteArray(4))
+        cache.put("image123", ByteArray(2))
+        cache.put("other123", ByteArray(3))
+        cache.put("obsolete123", ByteArray(5))
+        assertEquals(ContentCache.Stat(14L, 2), repository.cacheStat())
+        assertEquals(setOf("abc123", "image123", "other123"), db.repoEntryDao().getReferencedShas().toSet())
+        db.pendingEditDao().upsert(com.obsidiancompanion.data.metadata.entities.PendingEditEntity(
+            "other/repo", "other.md", "draftbase123", "draft", 1L))
+        assertEquals(listOf("draftbase123"), db.pendingEditDao().getBaseShas())
+    }
+
     @After
     fun tearDown() = runTest {
         server.shutdown()
@@ -105,6 +123,17 @@ class NoteRepositoryWriteTest {
             .setBody("""{"content":{"sha":"$newSha"},"commit":{"sha":"$commitSha"}}""")
 
     /* ── §45：baseSha ABC / remote ABC → save success ─────────── */
+
+    @Test
+    fun openNote_readsIndexedBlobEvenWhenBranchHasMoved() = runTest {
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse =
+                MockResponse().setBody(if (request.path == "/repos/o/r/git/blobs/abc123") "indexed version" else "new branch version")
+        }
+        val result = repository.openNote(path) as NoteOpenResult.Content
+        assertEquals("indexed version", result.markdown)
+        assertEquals("indexed version", cache.get("abc123")!!.toString(Charsets.UTF_8))
+    }
 
     @Test
     fun saveSuccess_updatesCacheEntryAndClearsDraft() = runTest {

@@ -58,6 +58,15 @@ interface GitHubApi {
     @GET
     suspend fun getRawContent(@Url url: okhttp3.HttpUrl): Response<ResponseBody>
 
+    /** 内容寻址读取：分支移动不影响此 SHA 对应的正文或图片。 */
+    @Headers("Accept: application/vnd.github.raw+json")
+    @GET("repos/{owner}/{repo}/git/blobs/{sha}")
+    suspend fun getRawBlob(
+        @Path("owner") owner: String,
+        @Path("repo") repo: String,
+        @Path("sha") sha: String,
+    ): Response<ResponseBody>
+
     /**
      * JSON 形态的 Contents read（Phase 5 冲突流程）：一次拿回最新 sha + Base64 正文。
      * URL 同样由调用方分段构建。

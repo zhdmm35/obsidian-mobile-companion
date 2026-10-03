@@ -29,6 +29,12 @@ interface RepoEntryDao {
     @Query("SELECT * FROM repo_entries WHERE repoId = :repoId")
     suspend fun getAll(repoId: String): List<RepoEntryEntity>
 
+    @Query("SELECT DISTINCT blobSha FROM repo_entries")
+    suspend fun getReferencedShas(): List<String>
+
+    @Query("SELECT blobSha FROM repo_entries WHERE repoId = :repoId AND kind = 'MARKDOWN'")
+    suspend fun getNoteShas(repoId: String): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<RepoEntryEntity>)
 
@@ -124,6 +130,9 @@ interface PendingEditDao {
 
     @Query("SELECT * FROM pending_edits")
     suspend fun getAll(): List<PendingEditEntity>
+
+    @Query("SELECT DISTINCT baseSha FROM pending_edits")
+    suspend fun getBaseShas(): List<String>
 
     @Query("SELECT * FROM pending_edits WHERE repoId = :repoId")
     suspend fun getAll(repoId: String): List<PendingEditEntity>

@@ -144,7 +144,7 @@ class SyncViewModel : ViewModel() {
 
     fun refreshCacheStats() {
         viewModelScope.launch {
-            val stat = AppGraph.contentCache.stat()
+            val stat = AppGraph.noteRepository.cacheStat()
             cacheStats.value = stat.count to Format.bytes(stat.bytes)
         }
     }

@@ -38,6 +38,8 @@ android {
         )
     }
 
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
@@ -68,6 +70,10 @@ android {
         compose = true
         buildConfig = true
     }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {

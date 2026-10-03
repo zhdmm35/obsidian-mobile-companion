@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   android:
-    name: Android tests and debug APK
+    name: Android unit tests, lint and APKs
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -28,8 +28,8 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Run unit tests and build APK
-        run: ./gradlew testDebugUnitTest assembleDebug
+      - name: Run unit tests, lint and build APKs
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 
       - name: Upload debug APK
         if: success()
@@ -41,7 +41,10 @@ jobs:
 
   vaultsync:
     name: vaultsync tests
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: tools/vaultsync
@@ -61,3 +64,40 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Check Windows scripts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path . -Filter *.ps1 | ForEach-Object {
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+            if ($parseErrors) { throw ($parseErrors | Out-String) }
+          }
+
+  android-device:
+    name: Android Room, write and conflict regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Enable KVM
+        run: |
+          sudo chmod a+rw /dev/kvm
+          chmod +x gradlew
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          disable-animations: true
+          script: ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=com.obsidiancompanion.feature.search.ContentSearchBenchmarkTest
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-device-test-reports
+          path: app/build/reports/androidTests/

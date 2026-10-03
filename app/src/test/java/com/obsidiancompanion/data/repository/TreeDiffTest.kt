@@ -5,12 +5,29 @@ import com.obsidiancompanion.data.github.RemoteTreeEntry
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** §72：Tree Diff 语义 —— Added/Changed/Deleted/Unchanged + observedChangedAt 规则 + 隐藏路径过滤。 */
 class TreeDiffTest {
+
+    @Test
+    fun protectedLocalWrites_keepSavedAndCreatedEntriesUntilNextRefresh() {
+        val saved = old(path = "A.md", sha = "saved", observed = 200L)
+        val created = old(path = "New.md", sha = "created", observed = 201L)
+        val remote = RemoteTree("root", listOf(blob("A.md", "old")), null)
+        val protected = TreeDiff.compute("o/r", listOf(saved, created), remote, 300L, setOf("A.md", "New.md"))
+        assertEquals(listOf(saved, created), protected.entries)
+        assertEquals(2, protected.unchangedCount)
+        assertTrue(protected.upsertEntries().isEmpty())
+        assertTrue(protected.deletedPaths.isEmpty())
+        assertFalse(protected.hasChanges)
+        val next = TreeDiff.compute("o/r", protected.entries, remote, 400L)
+        assertEquals(listOf("A.md"), next.changedPaths)
+        assertEquals(listOf("New.md"), next.deletedPaths)
+    }
 
     private fun blob(path: String, sha: String, size: Long = 10) =
         RemoteTreeEntry(path, isDirectory = false, sha = sha, size = size)

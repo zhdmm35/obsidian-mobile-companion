@@ -55,6 +55,7 @@ function nowStamp() {
  */
 export function createSync({ vaultPath, log = () => {}, runGit = makeRunner(vaultPath) }) {
   let tail = Promise.resolve(); // 锁：新的 sync 排在上一个结束之后
+  let pendingAutomatic = null;
 
   async function doSync() {
     // 遗留 rebase（用户手动操作或上次进程被强杀中断）绝不插手：
@@ -134,10 +135,15 @@ export function createSync({ vaultPath, log = () => {}, runGit = makeRunner(vaul
   }
 
   function syncOnce(reason) {
+    const automatic = reason === 'watcher' || reason === 'periodic';
+    if (automatic && pendingAutomatic) return pendingAutomatic;
     const run = tail.then(() => {
+      // 运行中的自动同步仍允许排下一轮，保证期间的新文件变化最终被处理。
+      if (automatic) pendingAutomatic = null;
       log(`Sync: ${reason}`);
       return doSync();
     });
+    if (automatic) pendingAutomatic = run;
     tail = run.then(
       () => {},
       () => {}

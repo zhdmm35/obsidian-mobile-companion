@@ -9,6 +9,10 @@ import com.obsidiancompanion.data.github.GitHubRemoteDataSource
 import com.obsidiancompanion.data.metadata.AppDatabase
 import com.obsidiancompanion.data.settings.SettingsRepository
 import kotlinx.coroutines.async
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -79,6 +83,30 @@ class RepositoryIndexRefreshTest {
         } else {
             settings.clearRepository()
         }
+    }
+
+    @Test
+    fun delayedSnapshot_doesNotReplaceConcurrentSavedBlob() = runTest {
+        db.repoEntryDao().insertAll(listOf(com.obsidiancompanion.data.metadata.entities.RepoEntryEntity(
+            "o/r", "A.md", "A.md", null,
+            com.obsidiancompanion.data.metadata.entities.EntryKind.MARKDOWN, "a1", 3L, null,
+        )))
+        server.enqueue(treeJson().setBodyDelay(500, TimeUnit.MILLISECONDS))
+        val refresh = async { repository.refreshTree(force = true) }
+        withContext(Dispatchers.IO) { assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null) }
+        db.repoEntryDao().updateBlobAfterSave("o/r", "A.md", "saved", 8L, System.currentTimeMillis() + 1)
+        assertTrue(refresh.await() is RefreshOutcome.Success)
+        assertEquals("saved", db.repoEntryDao().get("o/r", "A.md")!!.blobSha)
+    }
+
+    @Test
+    fun cancelledRefresh_isNotReportedAsUnknownFailure() = runTest {
+        server.enqueue(treeJson().setBodyDelay(500, TimeUnit.MILLISECONDS))
+        val refresh = launch { repository.refreshTree(force = true) }
+        withContext(Dispatchers.IO) { assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null) }
+        refresh.cancelAndJoin()
+        assertFalse(repository.refreshUiState.value.refreshing)
+        org.junit.Assert.assertNull(repository.refreshUiState.value.lastOutcome)
     }
 
     @Test
