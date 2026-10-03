@@ -7,16 +7,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
@@ -43,6 +45,7 @@ import com.obsidiancompanion.core.design.AppShapes
 import com.obsidiancompanion.core.design.AppSpacing
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppIconButton
+import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.PrimaryButton
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.feature.files.createWriteErrorMessage
@@ -285,7 +288,7 @@ fun QuickCaptureScreen(
     BackHandler {
         if (viewModel.inFlight) onShowSnackbar("正在保存，请稍候") else viewModel.leave(onLeave)
     }
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().imePadding()) {
         // 顶栏：返回后本机草稿仍保留，上传期间等待请求结束。
         Row(
             modifier = Modifier
@@ -302,46 +305,76 @@ fun QuickCaptureScreen(
                     if (viewModel.inFlight) onShowSnackbar("正在保存，请稍候") else viewModel.leave(onLeave)
                 },
             )
-            Text("保存分享内容", style = AppTypography.appBarTitle)
+            Text("收集内容", style = AppTypography.appBarTitle)
         }
 
         Column(
             Modifier
-                .fillMaxSize()
+                .weight(1f)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = AppSpacing.screenPaddingHorizontal)
                 .padding(bottom = AppSpacing.screenBottomPadding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("上传到：${viewModel.targetRepo ?: "正在读取仓库配置…"}", style = AppTypography.caption, color = AppColors.textTertiary)
-            Text("返回后草稿仍保留，可从首页草稿中心继续处理", style = AppTypography.caption, color = AppColors.textTertiary)
-            if (viewModel.loading) Text("正在读取草稿…", style = AppTypography.caption)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = AppSpacing.sm)
+                    .clip(AppShapes.large)
+                    .background(AppColors.calloutNoteBg)
+                    .border(1.dp, AppColors.calloutNoteBorder, AppShapes.large)
+                    .padding(AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                    Icon(AppIcons.Share, contentDescription = null, tint = AppColors.calloutNoteTitle, modifier = Modifier.size(18.dp))
+                    Text(
+                        when {
+                            viewModel.loading -> "正在读取草稿…"
+                            viewModel.sharedText.isEmpty() -> "尚未读取到内容"
+                            else -> "内容已暂存本机"
+                        },
+                        style = AppTypography.bodyMedium,
+                        color = AppColors.calloutNoteTitle,
+                    )
+                }
+                Text("可以先返回，稍后从草稿中心继续整理。", style = AppTypography.caption, color = AppColors.textSecondary)
+            }
             // 分享内容预览（只读）
-            Text("内容", style = AppTypography.caption, color = AppColors.textTertiary)
+            Text("内容预览", style = AppTypography.sectionTitle, modifier = Modifier.padding(top = AppSpacing.sm))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 200.dp)
+                    .heightIn(min = 96.dp, max = 200.dp)
                     .clip(AppShapes.medium)
                     .background(AppColors.surface)
                     .border(1.dp, AppColors.borderStrong, AppShapes.medium)
                     .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
+                    .padding(16.dp),
             ) {
                 // 预览只取前若干字（大段分享不必整篇排版）；保存仍用完整 sharedText
                 Text(
                     viewModel.sharedText.take(PREVIEW_MAX_CHARS)
                         + if (viewModel.sharedText.length > PREVIEW_MAX_CHARS) "\n…" else "",
-                    style = AppTypography.codeInline,
+                    style = AppTypography.bodySmall,
                     color = AppColors.textSecondary,
                 )
+            }
+            if (viewModel.sharedText.length > PREVIEW_MAX_CHARS) {
+                Text("预览仅显示部分内容，保存时会保留全文。", style = AppTypography.caption, color = AppColors.textTertiary)
+            }
+
+            Text("保存位置", style = AppTypography.sectionTitle, modifier = Modifier.padding(top = AppSpacing.sm))
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                Icon(AppIcons.Folder, contentDescription = null, tint = AppColors.textTertiary, modifier = Modifier.padding(top = 2.dp).size(16.dp))
+                Text(viewModel.targetRepo ?: "正在读取仓库配置…", style = AppTypography.caption, color = AppColors.textTertiary, modifier = Modifier.weight(1f))
             }
 
             Text("笔记名", style = AppTypography.caption, color = AppColors.textTertiary)
             CaptureInput(
                 value = viewModel.nameField,
                 onValueChange = viewModel::onNameChange,
-                placeholder = "笔记名（自动补 .md）",
+                placeholder = "给这条收集起个名字",
                 enabled = !viewModel.inFlight && !viewModel.loading,
             )
 
@@ -349,9 +382,10 @@ fun QuickCaptureScreen(
             CaptureInput(
                 value = viewModel.folderField,
                 onValueChange = viewModel::onFolderChange,
-                placeholder = "留空保存在根目录，如 Inbox 或 收集/网页",
+                placeholder = "如 Inbox 或 收集/网页",
                 enabled = !viewModel.inFlight && !viewModel.loading,
             )
+            Text("文件夹留空时保存在根目录，笔记名自动补 .md。", style = AppTypography.caption, color = AppColors.textTertiary)
 
             viewModel.saveError?.let {
                 Text(it, style = AppTypography.caption, color = AppColors.danger)
@@ -359,10 +393,17 @@ fun QuickCaptureScreen(
             viewModel.offlineNotice?.let {
                 Text(it, style = AppTypography.caption, color = AppColors.textSecondary)
             }
-
-            Spacer(Modifier.height(6.dp))
+        }
+        AppHorizontalDivider()
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(AppColors.surface)
+                .padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.md),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
+        ) {
             PrimaryButton(
-                text = if (viewModel.inFlight) "保存中…" else "保存",
+                text = if (viewModel.inFlight) "保存中…" else "保存到 GitHub",
                 onClick = {
                     viewModel.save { fileName ->
                         onShowSnackbar("已保存到 $fileName")
@@ -372,6 +413,7 @@ fun QuickCaptureScreen(
                 enabled = !viewModel.inFlight && !viewModel.loading,
                 block = true,
             )
+            Text("点击保存才会上传；返回会保留本机草稿。", style = AppTypography.caption, color = AppColors.textTertiary)
         }
     }
 }
@@ -394,13 +436,13 @@ private fun CaptureInput(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .heightIn(min = 48.dp)
                     .clip(AppShapes.medium)
                     .background(AppColors.surface)
                     .border(1.dp, AppColors.borderStrong, AppShapes.medium),
                 contentAlignment = Alignment.CenterStart,
             ) {
-                Box(Modifier.padding(horizontal = 12.dp)) {
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
                     if (value.text.isEmpty()) {
                         Text(placeholder, style = AppTypography.bodyBase, color = AppColors.textMeta)
                     }

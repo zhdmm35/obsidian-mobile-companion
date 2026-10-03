@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,7 @@ import com.obsidiancompanion.model.markdown.findHeadingIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -134,7 +136,7 @@ fun ReaderScreen(
 }
 
 @Composable
-private fun ReaderTopBar(onBack: () -> Unit, onMore: (() -> Unit)?) {
+private fun ReaderTopBar(onBack: () -> Unit, onMore: (() -> Unit)?, onOutline: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -144,6 +146,9 @@ private fun ReaderTopBar(onBack: () -> Unit, onMore: (() -> Unit)?) {
     ) {
         AppIconButton(icon = AppIcons.Back, contentDescription = "返回", onClick = onBack)
         Spacer(Modifier.weight(1f))
+        if (onOutline != null) {
+            AppIconButton(icon = AppIcons.List, contentDescription = "目录", onClick = onOutline)
+        }
         if (onMore != null) {
             AppIconButton(icon = AppIcons.More, contentDescription = "更多", onClick = onMore)
         }
@@ -167,6 +172,10 @@ private fun ReaderContent(
     var moreSheetVisible by remember { mutableStateOf(false) }
     var fileInfoVisible by remember { mutableStateOf(false) }
     var readOnlyNoticeVisible by remember { mutableStateOf(false) }
+    var outlineVisible by remember(state.path) { mutableStateOf(false) }
+    val outline = remember(state.document) { readerOutline(state.document) }
+    val compactHeader = remember(state.document, state.title) { hasMatchingOpeningTitle(state.document, state.title) }
+    val scope = rememberCoroutineScope()
 
     // 连接时记录的写权限（只读先行）：仅明确 false 时拦截编辑入口；null（未知）不拦，由保存错误兜底
     val canWrite by produceState<Boolean?>(initialValue = null) {
@@ -269,7 +278,11 @@ private fun ReaderContent(
     }
 
     Column(Modifier.fillMaxSize()) {
-        ReaderTopBar(onBack = onBack, onMore = { moreSheetVisible = true })
+        ReaderTopBar(
+            onBack = onBack,
+            onMore = { moreSheetVisible = true },
+            onOutline = if (outline.isEmpty()) null else ({ outlineVisible = true }),
+        )
 
         // §39：正文可长按选择；普通 tap 仍触发 WikiLink / 外链（E2E 验证 §40）
         androidx.compose.foundation.text.selection.SelectionContainer(Modifier.fillMaxSize()) {
@@ -282,12 +295,14 @@ private fun ReaderContent(
                         .padding(
                             start = AppSpacing.readerPaddingHorizontal,
                             end = AppSpacing.readerPaddingHorizontal,
-                            top = 8.dp,
-                            bottom = 16.dp,
+                            top = if (compactHeader) 0.dp else 8.dp,
+                            bottom = if (compactHeader) 8.dp else 20.dp,
                         ),
                 ) {
-                    Text(state.title, style = AppTypography.readerTitle)
-                    Spacer(Modifier.height(8.dp))
+                    if (!compactHeader) {
+                        Text(state.title, style = AppTypography.readerTitle)
+                        Spacer(Modifier.height(12.dp))
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -344,6 +359,17 @@ private fun ReaderContent(
             item { Spacer(Modifier.height(30.dp)) }
             }
         }
+    }
+
+    if (outlineVisible) {
+        ReaderOutlineSheet(
+            entries = outline,
+            onDismiss = { outlineVisible = false },
+            onSelect = { entry ->
+                outlineVisible = false
+                scope.launch { listState.animateScrollToItem(entry.blockIndex + 1) }
+            },
+        )
     }
 
     if (moreSheetVisible) {

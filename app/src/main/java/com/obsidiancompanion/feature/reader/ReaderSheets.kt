@@ -2,13 +2,20 @@ package com.obsidiancompanion.feature.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.obsidiancompanion.BuildConfig
 import com.obsidiancompanion.core.design.AppColors
@@ -18,6 +25,36 @@ import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppBottomSheet
 import com.obsidiancompanion.core.ui.KeyValueRow
 import com.obsidiancompanion.core.ui.SheetActionRow
+
+@Composable
+fun ReaderOutlineSheet(
+    entries: List<ReaderOutlineEntry>,
+    onDismiss: () -> Unit,
+    onSelect: (ReaderOutlineEntry) -> Unit,
+) {
+    val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.6f).dp
+    AppBottomSheet(onDismiss = onDismiss) {
+        Text("目录", style = AppTypography.titleSmall, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = maxHeight)) {
+            items(entries, key = { it.blockIndex }) { entry ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button, onClick = { onSelect(entry) })
+                        .heightIn(min = 48.dp)
+                        .padding(start = 20.dp + ((entry.level - 1) * 12).dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        entry.title,
+                        style = if (entry.level == 1) AppTypography.rowTitleSmall else AppTypography.bodyBase,
+                        color = if (entry.level <= 2) AppColors.textPrimary else AppColors.textTertiary,
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * Reader 更多菜单（原型 moreMenu）：编辑 / 收藏 / 文件信息 / 复制路径 / 分享笔记 / 刷新此笔记。
