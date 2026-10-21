@@ -1,5 +1,6 @@
 package com.obsidiancompanion.feature.home
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,10 +29,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -236,8 +240,21 @@ private fun RecentReadingCard(note: NoteRowUi, onClick: () -> Unit) {
             Text("最近打开", style = AppTypography.caption, color = AppColors.textTertiary, modifier = Modifier.weight(1f))
             note.timeLabel?.let { Text(it, style = AppTypography.caption, color = AppColors.textMeta) }
         }
-        Text(note.title, style = AppTypography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(note.folder, style = AppTypography.caption, color = AppColors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                Text(note.title, style = AppTypography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(note.folder, style = AppTypography.caption, color = AppColors.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Image(
+                painter = painterResource(R.drawable.bookmark_reading_v2),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(width = 96.dp, height = 64.dp).clip(AppShapes.medium),
+            )
+        }
         Row(
             Modifier.fillMaxWidth().padding(top = AppSpacing.sm),
             verticalAlignment = Alignment.CenterVertically,

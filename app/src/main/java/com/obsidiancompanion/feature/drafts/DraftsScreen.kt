@@ -24,8 +24,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
-import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.BackTopBar
 import com.obsidiancompanion.core.ui.ConfirmationDialog
@@ -142,7 +142,7 @@ fun DraftsScreen(
             if (state.loading) item { Text("正在读取草稿…", style = AppTypography.bodySmall) }
             else if (state.error != null) item { Text(state.error.orEmpty(), style = AppTypography.bodySmall, color = AppColors.danger) }
             else if (state.edits.isEmpty() && state.shares.isEmpty()) item {
-                EmptyState(icon = AppIcons.Book, title = "还没有草稿", subtitle = "编辑笔记或分享内容到本应用后，可在这里继续处理")
+                EmptyState(illustration = R.drawable.bookmark_drafts_v2, title = "还没有草稿", subtitle = "编辑笔记或分享内容到本应用后，可在这里继续处理")
             }
             if (state.edits.isNotEmpty()) item { Text("笔记编辑 · ${state.edits.size}", style = AppTypography.rowTitleSmall) }
             items(state.edits, key = { "edit:${it.repoId}:${it.path}" }) { draft ->

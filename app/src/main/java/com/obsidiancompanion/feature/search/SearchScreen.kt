@@ -300,7 +300,7 @@ fun SearchScreen(
                     .padding(bottom = AppSpacing.screenBottomPadding),
             ) {
                 EmptyState(
-                    illustration = R.drawable.spot_search,
+                    illustration = R.drawable.bookmark_search_v2,
                     title = if (viewModel.searchingContent) "正在搜索已缓存正文…" else "没有找到「${viewModel.query.trim()}」相关的笔记",
                     subtitle = if (viewModel.searchingContent) "缓存内容较多时，请稍候" else "试试更短的关键词；正文匹配只覆盖打开过的笔记",
                 )

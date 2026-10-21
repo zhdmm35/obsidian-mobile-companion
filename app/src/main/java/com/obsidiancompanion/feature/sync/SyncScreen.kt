@@ -1,5 +1,6 @@
 package com.obsidiancompanion.feature.sync
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,11 +30,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
+import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
 import com.obsidiancompanion.core.design.AppShapes
@@ -247,18 +251,29 @@ fun SyncScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(CircleShape)
-                    .background(AppColors.surface)
-                    .border(1.dp, AppColors.border, CircleShape),
-                contentAlignment = Alignment.Center,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.md),
             ) {
-                if (hero.spinning) {
-                    SpinningIcon(hero.icon, tint = AppColors.textPrimary, size = 24.dp, contentDescription = hero.title)
-                } else {
-                    Icon(hero.icon, contentDescription = hero.title, tint = hero.iconTint, modifier = Modifier.size(24.dp))
+                Image(
+                    painter = painterResource(R.drawable.bookmark_sync_v2),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(width = 168.dp, height = 112.dp).clip(AppShapes.large),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(AppColors.surface)
+                        .border(1.dp, AppColors.border, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (hero.spinning) {
+                        SpinningIcon(hero.icon, tint = AppColors.textPrimary, size = 24.dp, contentDescription = hero.title)
+                    } else {
+                        Icon(hero.icon, contentDescription = hero.title, tint = hero.iconTint, modifier = Modifier.size(24.dp))
+                    }
                 }
             }
             Text(hero.title, style = AppTypography.titleMedium)
