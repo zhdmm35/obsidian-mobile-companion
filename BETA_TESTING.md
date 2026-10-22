@@ -41,6 +41,15 @@ The v0.1.3 release is an installable prerelease for real-world feedback. Test it
 
 Inbox 源文件会保留形如 `<!-- inkstone-capture:… -->` 的隐藏注释，阅读时不显示，用于识别已成功追加的分享。手工删除该标记后，旧草稿重试将无法识别之前的上传。
 
+## 当前开发版：今日笔记与内置模板
+
+1. 首页点击「今日笔记」，核对手机本地日期、仓库和完整目标路径。日记目录留空时使用根目录，文件名固定为 `YYYY-MM-DD.md`；确认前不会创建文件。
+2. 选择日记或会议记录模板，确认初始正文；目标已存在时应直接打开原笔记，不替换正文。已有同路径编辑草稿也应保留。新建需要联网，已缓存的日记可离线打开。
+3. 在电脑先创建同名日记、手机尚未刷新索引时点击「打开或创建」，应打开电脑的内容；在创建过程中重复点击不能产生多个请求。
+4. 更改日记目录和模板并确认，再次打开应沿用选择；切换另一仓库后应使用该仓库自己的设置。取消对话框不改变偏好。
+5. 全部笔记 → 新建，输入笔记名并选择模板，预览标题与日期；创建后编辑器正文应与预览一致。空白模板继续创建空文件，同名笔记仍提示换名。
+6. 小屏、横屏和字体放大时，确认表单可以滚动，模板选项与确认/取消按钮可操作；跨午夜停留在今日笔记对话框时，确认仍使用展示的日期，重新打开后更新到新日期。
+
 ## What to report
 
 Use the [beta feedback issue form](.github/ISSUE_TEMPLATE/beta_feedback.yml). Include device model, Android version, app version, test scenario, expected result, actual result, and sanitized logs. Do not include tokens, private repository URLs, or private note content.

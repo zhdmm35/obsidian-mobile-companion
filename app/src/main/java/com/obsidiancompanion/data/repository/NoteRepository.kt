@@ -48,6 +48,12 @@ sealed interface NoteSaveResult {
     data class Error(val error: DomainError) : NoteSaveResult
 }
 
+/** 今日笔记：已有内容只打开，只有文件不存在时才创建初始正文。 */
+sealed interface NoteCreationResult {
+    data class Ready(val path: String, val created: Boolean) : NoteCreationResult
+    data class Error(val error: DomainError) : NoteCreationResult
+}
+
 /**
  * NoteRepository（§39）：openNote(path) = Index 查 blobSha → ContentCache →（MISS）GitHub → 缓存。
  * ViewModel 不感知 Cache 命中与否；不做 File IO；解析在 Default 线程池（§79）。
@@ -172,22 +178,48 @@ class NoteRepository(
             if (expectedRepoId != null && ctx.repoId != expectedRepoId) {
                 return@withContext NoteSaveResult.Error(DomainError.Unknown)
             }
-            if (index.getEntry(ctx.repoId, path) != null) {
-                return@withContext NoteSaveResult.Conflict(path)
-            }
+            createNote(ctx, path, content)
+        }
 
-            val bytes = content.toByteArray(Charsets.UTF_8)
-            val message = "mobile: create ${path.substringAfterLast('/')}"
-            when (val r = remote.createFile(ctx.owner, ctx.repo, path, bytes, message, ctx.branch)) {
-                is GitHubResult.Ok -> {
-                    insertSavedContent(ctx.repoId, path, r.value.newSha, bytes)
-                    NoteSaveResult.Saved(path, r.value.newSha, r.value.commitSha)
+    private suspend fun createNote(ctx: WriteContext, path: String, content: String): NoteSaveResult {
+        if (index.getEntry(ctx.repoId, path) != null) return NoteSaveResult.Conflict(path)
+
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        val message = "mobile: create ${path.substringAfterLast('/')}"
+        return when (val r = remote.createFile(ctx.owner, ctx.repo, path, bytes, message, ctx.branch)) {
+            is GitHubResult.Ok -> {
+                insertSavedContent(ctx.repoId, path, r.value.newSha, bytes)
+                NoteSaveResult.Saved(path, r.value.newSha, r.value.commitSha)
+            }
+            is GitHubResult.Fail -> when (r.error) {
+                DomainError.Conflict -> NoteSaveResult.Conflict(path)
+                else -> NoteSaveResult.Error(r.error)
+            }
+            is GitHubResult.NotModified -> NoteSaveResult.Error(DomainError.Unknown)
+        }
+    }
+
+    /** 本机已索引的今日笔记离线也能打开；索引漏项或并发创建时读取远端，不覆盖它。 */
+    suspend fun openOrCreateNote(path: String, initialContent: String, expectedRepoId: String): NoteCreationResult =
+        withContext(Dispatchers.Default) {
+            val ctx = writeContext() ?: return@withContext NoteCreationResult.Error(DomainError.Unknown)
+            if (ctx.repoId != expectedRepoId) return@withContext NoteCreationResult.Error(DomainError.Unknown)
+            val entry = index.getEntry(ctx.repoId, path)
+            if (entry != null) {
+                return@withContext if (entry.kind == EntryKind.MARKDOWN) NoteCreationResult.Ready(path, created = false)
+                else NoteCreationResult.Error(DomainError.Conflict)
+            }
+            when (val result = createNote(ctx, path, initialContent)) {
+                is NoteSaveResult.Saved -> NoteCreationResult.Ready(path, created = true)
+                is NoteSaveResult.Error -> NoteCreationResult.Error(result.error)
+                is NoteSaveResult.Conflict -> when (val latest = remote.getFileContent(ctx.owner, ctx.repo, path, ctx.branch)) {
+                    is GitHubResult.Ok -> {
+                        insertSavedContent(ctx.repoId, path, latest.value.sha, latest.value.bytes)
+                        NoteCreationResult.Ready(path, created = false)
+                    }
+                    is GitHubResult.Fail -> NoteCreationResult.Error(latest.error)
+                    is GitHubResult.NotModified -> NoteCreationResult.Error(DomainError.Unknown)
                 }
-                is GitHubResult.Fail -> when (r.error) {
-                    DomainError.Conflict -> NoteSaveResult.Conflict(path)
-                    else -> NoteSaveResult.Error(r.error)
-                }
-                is GitHubResult.NotModified -> NoteSaveResult.Error(DomainError.Unknown) // PUT 不会 304；防御分支
             }
         }
 

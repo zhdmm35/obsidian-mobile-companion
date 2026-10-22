@@ -218,6 +218,7 @@ fun AppNavGraph() {
             composable(Routes.HOME) {
                 HomeScreen(
                     onOpenNote = { openNote(it) },
+                    onOpenEditor = { path -> navController.navigate(Routes.editor(URLEncoder.encode(path, "UTF-8"))) },
                     onOpenSearch = { navigateToTab(Routes.SEARCH) },
                     onOpenFiles = { navigateToTab(Routes.FILES) },
                     onOpenSync = { navController.navigate(Routes.SYNC) },

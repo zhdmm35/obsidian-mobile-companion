@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.obsidiancompanion.AppGraph
 import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
 import com.obsidiancompanion.core.design.AppIcons
@@ -59,13 +60,23 @@ fun HomeScreen(
     onOpenFiles: () -> Unit,
     onOpenSync: () -> Unit,
     onOpenDrafts: () -> Unit,
+    onOpenEditor: (String) -> Unit = onOpenNote,
     viewModel: HomeViewModel = viewModel(),
+    dailyViewModel: DailyNoteViewModel = viewModel(factory = AppGraph.dailyNoteViewModelFactory),
 ) {
     val state by viewModel.uiState.collectAsState()
     // 所有仓库的编辑草稿与分享草稿总数。
     val draftCount by viewModel.draftCount.collectAsState()
     var showRecentRead by rememberSaveable { mutableStateOf(false) }
+    var showDailyNote by rememberSaveable { mutableStateOf(false) }
     val lastRead = state.recentRead.firstOrNull()
+
+    if (showDailyNote) {
+        DailyNoteDialog(dailyViewModel, onReady = { path, created ->
+            showDailyNote = false
+            if (created) onOpenEditor(path) else onOpenNote(path)
+        }, onDismiss = { showDailyNote = false })
+    }
 
     Column(
         modifier = Modifier
@@ -118,6 +129,23 @@ fun HomeScreen(
         ) {
             Icon(AppIcons.Search, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
             Text("搜索笔记……", style = AppTypography.bodyBase, color = AppColors.textMeta)
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.sm)
+                .clip(AppShapes.medium).background(AppColors.surface)
+                .border(1.dp, AppColors.borderStrong, AppShapes.medium)
+                .clickable(role = Role.Button) { dailyViewModel.prepare(); showDailyNote = true }
+                .heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(AppIcons.FileText, contentDescription = null, tint = AppColors.accent, modifier = Modifier.size(18.dp))
+            Column(Modifier.weight(1f)) {
+                Text("今日笔记", style = AppTypography.rowTitleSmall)
+                Text("打开今天的记录，或按模板新建", style = AppTypography.caption, color = AppColors.textTertiary)
+            }
+            Icon(AppIcons.ChevronRight, contentDescription = null, tint = AppColors.textMeta, modifier = Modifier.size(16.dp))
         }
 
         if (lastRead != null) {

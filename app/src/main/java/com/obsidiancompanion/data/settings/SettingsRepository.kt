@@ -19,6 +19,8 @@ data class AppSettings(
     val canWrite: Boolean? = null,
     /** 当前仓库最近使用的收集目录；仅给新分享预填，不修改已有草稿。 */
     val captureFolder: String = "",
+    val dailyNoteFolder: String = "",
+    val dailyNoteTemplate: String = "daily",
 ) {
     val repoId: String? get() = if (owner != null && repo != null) "$owner/$repo" else null
 }
@@ -41,6 +43,8 @@ class SettingsRepository(private val context: Context) {
             autoRefresh = p[AUTO_REFRESH] ?: true,
             canWrite = p[CAN_WRITE],
             captureFolder = repoId?.let { p[captureFolderKey(it)] } ?: "",
+            dailyNoteFolder = repoId?.let { p[dailyFolderKey(it)] } ?: "",
+            dailyNoteTemplate = repoId?.let { p[dailyTemplateKey(it)] } ?: "daily",
         )
     }
 
@@ -65,6 +69,13 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { it[captureFolderKey(repoId)] = folder }
     }
 
+    suspend fun setDailyNotePreferences(repoId: String, folder: String, templateId: String) {
+        context.settingsDataStore.edit {
+            it[dailyFolderKey(repoId)] = folder
+            it[dailyTemplateKey(repoId)] = templateId
+        }
+    }
+
     /** 重连/重置 onboarding：清仓库选择与完成标记（保留 Token 与用户 metadata）。 */
     suspend fun clearRepository() {
         context.settingsDataStore.edit { p ->
@@ -78,6 +89,8 @@ class SettingsRepository(private val context: Context) {
 
     private companion object {
         fun captureFolderKey(repoId: String) = stringPreferencesKey("capture_folder:$repoId")
+        fun dailyFolderKey(repoId: String) = stringPreferencesKey("daily_note_folder:$repoId")
+        fun dailyTemplateKey(repoId: String) = stringPreferencesKey("daily_note_template:$repoId")
         val OWNER = stringPreferencesKey("owner")
         val REPO = stringPreferencesKey("repo")
         val BRANCH = stringPreferencesKey("default_branch")

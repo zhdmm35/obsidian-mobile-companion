@@ -153,16 +153,17 @@ class FilesViewModel : ViewModel() {
         private set
 
     /**
-     * 在当前目录新建空 Markdown 并打开 Editor（§写路径与 Editor 同一收敛语义：
+     * 在当前目录按模板新建 Markdown 并打开 Editor（§写路径与 Editor 同一收敛语义：
      * 成功 → 异步 refreshTree 补齐整树；同名 → 内联错误；绝不覆盖已有文件）。
      */
-    fun createNote(rawName: String, onCreated: (String) -> Unit) {
+    fun createNote(rawName: String, template: NoteTemplate, date: java.time.LocalDate, onCreated: (String) -> Unit) {
         val fileName = sanitizeNoteName(rawName)
         if (fileName == null) {
             createError = "名字不可用：不能为空，不含 / \\ :，也不以 . 开头"
             return
         }
         val folder = currentPath
+        val targetRepo = repoId ?: return
         val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
         if (createInFlight) return
         if (!AppGraph.network.isOnline) {
@@ -172,26 +173,22 @@ class FilesViewModel : ViewModel() {
         createInFlight = true
         createError = null
         viewModelScope.launch {
-            when (val r = AppGraph.noteRepository.createNote(path, "")) {
-                is NoteSaveResult.Saved -> {
-                    createInFlight = false
-                    // 写操作后远端 Tree 必变：绕过 freshness window 强制补齐整树（如新目录的 DIRECTORY 行）
-                    AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
-                    onCreated(path)
+            try {
+                when (val r = AppGraph.noteRepository.createNote(path, template.render(fileName.dropLast(3), date), expectedRepoId = targetRepo)) {
+                    is NoteSaveResult.Saved -> {
+                        AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
+                        onCreated(path)
+                    }
+                    is NoteSaveResult.Conflict -> createError = "同名笔记已存在，换个名字吧"
+                    is NoteSaveResult.Error -> createError = createWriteErrorMessage(
+                            r.error,
+                            offline = "当前离线，无法新建笔记",
+                            fallback = "创建失败，请稍后再试",
+                        )
                 }
-                is NoteSaveResult.Conflict -> {
-                    createInFlight = false
-                    createError = "同名笔记已存在，换个名字吧"
-                }
-                is NoteSaveResult.Error -> {
-                    createInFlight = false
-                    createError = createWriteErrorMessage(
-                        r.error,
-                        offline = "当前离线，无法新建笔记",
-                        fallback = "创建失败，请稍后再试",
-                    )
-                }
-            }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { createError = "创建未完成，请稍后重试" }
+            finally { createInFlight = false }
         }
     }
 
@@ -249,8 +246,8 @@ fun FilesScreen(
             folderLabel = viewModel.currentPath.ifEmpty { "根目录" },
             creating = viewModel.createInFlight,
             error = viewModel.createError,
-            onCreate = { raw ->
-                viewModel.createNote(raw) { path ->
+            onCreate = { raw, template, date ->
+                viewModel.createNote(raw, template, date) { path ->
                     showCreateDialog = false
                     onOpenEditor(path) // 创建成功直接进入编辑 —— 「随手记一笔」不打断
                 }

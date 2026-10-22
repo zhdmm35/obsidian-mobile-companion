@@ -127,6 +127,53 @@ class NoteRepositoryWriteTest {
         return MockResponse().setBody("""{"sha":"$sha","encoding":"base64","content":"$encoded"}""")
     }
 
+    @Test fun dailyNoteAlreadyIndexedOpensWithoutRequestsAndPreservesDraft() = runTest {
+        repository.stagePendingEdit(path, "abc123", "unfinished edit")
+        assertEquals(NoteCreationResult.Ready(path, false), repository.openOrCreateNote(path, "template", "o/r"))
+        assertEquals(0, server.requestCount)
+        assertEquals("abc123", db.repoEntryDao().get("o/r", path)!!.blobSha)
+        assertEquals("unfinished edit", repository.getPendingEdit(path)!!.content)
+    }
+
+    @Test fun missingDailyNoteCreatesTemplateWithoutOverwriteSha() = runTest {
+        server.enqueue(json200("dailynewsha"))
+        val dailyPath = "日记/2026-10-22.md"
+        assertEquals(NoteCreationResult.Ready(dailyPath, true), repository.openOrCreateNote(dailyPath, "# 今日\n\n- [ ] ", "o/r"))
+        val body = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertNull(body["sha"])
+        assertEquals("main", body["branch"]!!.jsonPrimitive.content)
+        assertEquals("# 今日\n\n- [ ] ", cache.get("dailynewsha")!!.toString(Charsets.UTF_8))
+        assertEquals("dailynewsha", db.repoEntryDao().get("o/r", dailyPath)!!.blobSha)
+    }
+
+    @Test fun dailyNoteCreatedElsewhereIsFetchedInsteadOfOverwritten() = runTest {
+        settings.setRepository("o", "r", "notes/daily")
+        val dailyPath = "日记/2026-10-22.md"
+        repository.stagePendingEdit(dailyPath, "draftbase", "my draft")
+        server.enqueue(MockResponse().setResponseCode(422))
+        server.enqueue(remoteContent("existingdailysha", "PC 上已有的日记"))
+        assertEquals(NoteCreationResult.Ready(dailyPath, false), repository.openOrCreateNote(dailyPath, "template", "o/r"))
+        val create = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertNull(create["sha"])
+        val get = server.takeRequest()
+        assertEquals("GET", get.method)
+        assertEquals("notes/daily", get.requestUrl!!.queryParameter("ref"))
+        assertEquals(2, server.requestCount)
+        assertEquals("PC 上已有的日记", cache.get("existingdailysha")!!.toString(Charsets.UTF_8))
+        assertEquals("my draft", repository.getPendingEdit(dailyPath)!!.content)
+    }
+
+    @Test fun dailyNoteRejectsOtherRepositoryAndDirectoryAndDoesNotHideServerFailure() = runTest {
+        assertTrue(repository.openOrCreateNote(path, "template", "other/repo") is NoteCreationResult.Error)
+        db.repoEntryDao().insertAll(listOf(entry("dirsha").copy(kind = EntryKind.DIRECTORY)))
+        assertEquals(NoteCreationResult.Error(DomainError.Conflict), repository.openOrCreateNote(path, "template", "o/r"))
+        assertEquals(0, server.requestCount)
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertEquals(NoteCreationResult.Error(DomainError.ServerError), repository.openOrCreateNote("New.md", "template", "o/r"))
+        assertEquals(1, server.requestCount)
+        assertNull(db.repoEntryDao().get("o/r", "New.md"))
+    }
+
     @Test fun appendUsesLatestBranchShaAndPreservesEditorDraft() = runTest {
         settings.setRepository("o", "r", "notes/mobile")
         repository.stagePendingEdit(path, "abc123", "unsaved editor text")

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.obsidiancompanion.feature.editor.EditorViewModel
+import com.obsidiancompanion.feature.home.DailyNoteViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -59,6 +60,15 @@ object AppGraph {
                 EditorViewModel(noteRepository, { network.isOnline }, {
                     appScope.launch { indexRepository.refreshTree() }
                 }, backgroundScope = appScope)
+            }
+        }
+    }
+
+    val dailyNoteViewModelFactory by lazy {
+        viewModelFactory {
+            initializer {
+                DailyNoteViewModel(settings.flow, noteRepository::openOrCreateNote, settings::setDailyNotePreferences,
+                    { appScope.launch { indexRepository.refreshTree(force = true) } })
             }
         }
     }
