@@ -22,6 +22,7 @@ import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.data.settings.AppSettings
 import com.obsidiancompanion.feature.capture.QuickCaptureScreen
 import com.obsidiancompanion.feature.capture.QuickCaptureViewModel
+import com.obsidiancompanion.feature.capture.defaultCaptureTitle
 import com.obsidiancompanion.feature.editor.EditorScreen
 import com.obsidiancompanion.feature.editor.EditorViewModel
 import kotlinx.coroutines.flow.first
@@ -86,13 +87,18 @@ class DraftExperienceTest {
     }
 
     @Test fun newShareUsesRememberedFolderAndAppendShowsExactDestination() {
+        val sharedText = "Capture ${java.util.UUID.randomUUID()}"
         val intent = Intent(instrumentation.targetContext, MainActivity::class.java)
             .setAction(Intent.ACTION_SEND).setType("text/plain")
-            .putExtra(Intent.EXTRA_TEXT, "Synthetic capture experience share")
+            .putExtra(Intent.EXTRA_TEXT, sharedText)
         scenario = ActivityScenario.launch(intent)
-        waitForText("收集/网页")
-        val draft = runBlocking { AppGraph.captureDraft.drafts.first().first { it.name.startsWith("Synthetic capture") } }
+        val title = defaultCaptureTitle(sharedText)
+        waitUntil { runBlocking { AppGraph.captureDraft.drafts.first().any { it.name == title } } }
+        val draft = runBlocking { AppGraph.captureDraft.drafts.first().first { it.name == title } }
         draftIds += draft.id
+        // 小屏上目录输入框可能在折叠区下方；验证落盘目录及可见的完整目标确认，不依赖屏高。
+        waitForText("内容已暂存本机")
+        assertEquals("收集/网页", draft.folder)
         screenshot("experience-capture.png")
         click("追加到 Inbox.md")
         waitForText("收集/网页/Inbox.md")
