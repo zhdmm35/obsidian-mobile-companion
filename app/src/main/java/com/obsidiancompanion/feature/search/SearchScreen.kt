@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +48,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.obsidiancompanion.AppGraph
@@ -62,6 +66,7 @@ import com.obsidiancompanion.core.ui.AppChip
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SectionHeader
+import com.obsidiancompanion.core.ui.SecondaryButton
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import kotlinx.coroutines.Dispatchers
@@ -105,8 +110,14 @@ class SearchViewModel : ViewModel() {
     var hasIndex by mutableStateOf(false)
         private set
 
+    var cachedNoteCount by mutableStateOf<Int?>(null)
+        private set
+    var totalNoteCount by mutableStateOf(0)
+        private set
+
     private var tree: List<RepoEntryEntity> = emptyList()
     private var contentJob: kotlinx.coroutines.Job? = null
+    private var coverageJob: kotlinx.coroutines.Job? = null
 
     val query: String get() = queryField.text
 
@@ -123,10 +134,14 @@ class SearchViewModel : ViewModel() {
                     },
                 ) { t, recent -> t to recent }
             }.collect { (t, recent) ->
+                val treeChanged = tree != t
                 tree = t
                 hasIndex = t.isNotEmpty()
                 recentQueries = recent.map { it.query }
-                onQueryChanged()
+                if (treeChanged) {
+                    recompute()
+                    refreshCoverage()
+                }
             }
         }
     }
@@ -153,6 +168,18 @@ class SearchViewModel : ViewModel() {
     fun clear() {
         queryField = TextFieldValue("")
         onQueryChanged()
+    }
+
+    /** 返回搜索页或回到前台时重新核对缓存，并让当前查询覆盖新下载的正文；不触发下载。 */
+    fun refreshCoverage() {
+        coverageJob?.cancel()
+        val shas = tree.filter { it.kind == EntryKind.MARKDOWN }.map { it.blobSha }
+        totalNoteCount = shas.size
+        cachedNoteCount = null
+        scheduleContentSearch()
+        coverageJob = viewModelScope.launch {
+            cachedNoteCount = AppGraph.contentCache.stat(shas).count
+        }
     }
 
     /** 查询或 tree 变化的统一入口：文件名即时重算 + 正文防抖重排。 */
@@ -207,10 +234,20 @@ class SearchViewModel : ViewModel() {
 fun SearchScreen(
     onBack: () -> Unit,
     onOpenNote: (String) -> Unit,
+    onManageOffline: () -> Unit,
     viewModel: SearchViewModel = viewModel(),
 ) {
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        viewModel.refreshCoverage()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshCoverage()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val results = viewModel.results
     // 正文命中与文件名命中同篇去重：文件名区已能到达的笔记不再重复展示；
     // HashSet 将去重降为线性扫描；remember 避免无关重组时重算。
@@ -277,6 +314,24 @@ fun SearchScreen(
             }
         }
 
+        if (viewModel.totalNoteCount > 0) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 8.dp)) {
+                Text(
+                    viewModel.cachedNoteCount?.let { "正文可搜索 $it / ${viewModel.totalNoteCount} 篇" }
+                        ?: "正在统计可搜索的正文…",
+                    style = AppTypography.bodySmall,
+                    color = AppColors.textSecondary,
+                )
+                Text("文件名覆盖全部已索引笔记；正文覆盖已打开或已下载的笔记。",
+                    style = AppTypography.caption, color = AppColors.textTertiary)
+                if (viewModel.cachedNoteCount?.let { it < viewModel.totalNoteCount } == true) {
+                    SecondaryButton(text = "管理离线下载", onClick = onManageOffline)
+                    Text("在文件夹菜单选择“下载供离线阅读”，下载后即可搜索正文。",
+                        style = AppTypography.caption, color = AppColors.textTertiary)
+                }
+            }
+        }
+
         when {
             viewModel.isIdle -> Column(
                 Modifier
@@ -290,7 +345,7 @@ fun SearchScreen(
                 EmptyState(
                     icon = AppIcons.Search,
                     title = "按文件名与正文搜索",
-                    subtitle = if (viewModel.hasIndex) "输入关键词，文件名即时匹配；正文匹配覆盖打开过的笔记" else "还没有仓库索引，联网刷新一次后即可搜索",
+                    subtitle = if (viewModel.hasIndex) "输入关键词，搜索文件名与已缓存正文" else "还没有仓库索引，联网刷新一次后即可搜索",
                 )
             }
             results.isEmpty() && contentMatches.isEmpty() -> Column(
@@ -302,7 +357,7 @@ fun SearchScreen(
                 EmptyState(
                     illustration = R.drawable.bookmark_search_v2,
                     title = if (viewModel.searchingContent) "正在搜索已缓存正文…" else "没有找到「${viewModel.query.trim()}」相关的笔记",
-                    subtitle = if (viewModel.searchingContent) "缓存内容较多时，请稍候" else "试试更短的关键词；正文匹配只覆盖打开过的笔记",
+                    subtitle = if (viewModel.searchingContent) "缓存内容较多时，请稍候" else "试试更短的关键词，或下载更多笔记后重试",
                 )
             }
             else -> {
@@ -311,14 +366,6 @@ fun SearchScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = AppSpacing.screenBottomPadding),
                 ) {
-                    item(key = "search-scope") {
-                        Text(
-                            "正文仅搜索已缓存笔记",
-                            style = AppTypography.caption,
-                            color = AppColors.textTertiary,
-                            modifier = Modifier.padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = AppSpacing.xs),
-                        )
-                    }
                     if (viewModel.searchingContent) item {
                         Text("正在搜索已缓存正文…", style = AppTypography.caption, color = AppColors.textTertiary,
                             modifier = Modifier.padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 8.dp))

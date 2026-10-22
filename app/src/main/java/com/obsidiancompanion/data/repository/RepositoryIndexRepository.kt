@@ -117,7 +117,9 @@ class RepositoryIndexRepository(
                                 repoId = repoId,
                                 branch = branch,
                                 rootTreeSha = r.value.rootSha,
-                                etag = r.value.etag,
+                                // 并发保护可能保留了与远端快照不同的条目；下次必须重取完整快照，
+                                // 否则 304 会让这些条目永远无法收敛到远端后续版本。
+                                etag = r.value.etag.takeIf { recentLocalWrites.isEmpty() },
                                 lastRefreshAt = now,
                                 lastRefreshResult = "SUCCESS",
                                 entryCount = diff.entries.size,

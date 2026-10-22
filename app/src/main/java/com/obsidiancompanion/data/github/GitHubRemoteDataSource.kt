@@ -229,6 +229,7 @@ class GitHubRemoteDataSource(
                 !resp.isSuccessful -> return GitHubResult.Fail(DomainError.ServerError, resp.code())
                 body == null -> return GitHubResult.Fail(DomainError.MalformedResponse)
                 body.truncated -> return GitHubResult.Fail(DomainError.MalformedResponse) // 单层也截断，属于异常仓库
+                body.tree.size > MAX_ENTRIES - entries.size -> return GitHubResult.Fail(DomainError.MalformedResponse)
                 else -> body.tree.forEach { dto ->
                     val fullPath = if (prefix.isEmpty()) dto.path else "$prefix/${dto.path}"
                     entries += dto.toDomain().let { it.copy(path = fullPath) }
@@ -236,6 +237,8 @@ class GitHubRemoteDataSource(
                 }
             }
         }
+        // 达到保护上限时仍有子树未读，绝不能把部分目录交给 TreeDiff 当作完整快照。
+        if (pending.isNotEmpty()) return GitHubResult.Fail(DomainError.MalformedResponse)
         return GitHubResult.Ok(RemoteTree(rootTreeSha, entries, etag), etag)
     }
 

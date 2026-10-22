@@ -220,7 +220,7 @@ fun HomeScreen(
     }
 }
 
-/** 最新阅读记录来自本机 metadata；再次打开沿用阅读器，不承诺恢复滚动位置。 */
+/** 最新阅读记录来自本机 metadata；同一正文版本再次打开时恢复本机阅读位置。 */
 @Composable
 private fun RecentReadingCard(note: NoteRowUi, onClick: () -> Unit) {
     Column(

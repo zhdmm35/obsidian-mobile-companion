@@ -21,6 +21,7 @@ sealed interface ReaderUiState {
     data object Loading : ReaderUiState
 
     data class Content(
+        val repoId: String,
         val path: String,
         val title: String,
         val folder: String,
@@ -32,6 +33,7 @@ sealed interface ReaderUiState {
         val sizeLabel: String,
         val blobSha: String,
         val changedLabel: String?,
+        val readingPosition: ReadingPosition,
     ) : ReaderUiState
 
     /** 从未缓存 + 离线（§5 专用提示文案）。 */
@@ -60,6 +62,17 @@ class ReaderViewModel : ViewModel() {
     private var lastSha: String? = null
     private var observingPath: String? = null
     private var favoriteJob: kotlinx.coroutines.Job? = null
+    private var positionSaveJob: kotlinx.coroutines.Job? = null
+
+    fun saveReadingPosition(content: ReaderUiState.Content, itemIndex: Int, scrollOffset: Int) {
+        positionSaveJob?.cancel()
+        // 导航返回或切后台后仍完成这次本机写入；仓库身份取自已展示的正文快照。
+        positionSaveJob = AppGraph.appScope.launch {
+            AppGraph.database.noteMetadataDao().saveReadingPosition(
+                content.repoId, content.path, content.blobSha, itemIndex.coerceAtLeast(0), scrollOffset.coerceAtLeast(0),
+            )
+        }
+    }
 
     /** 由 Screen 在进入 / 路径变化时调用。 */
     fun load(path: String) {
@@ -83,6 +96,7 @@ class ReaderViewModel : ViewModel() {
                     // §51：内容真正可展示后才计入阅读
                     AppGraph.noteRepository.markRead(path)
                     state = ReaderUiState.Content(
+                        repoId = r.entry.repoId,
                         path = path,
                         title = r.entry.name.removeSuffix(".md"),
                         folder = r.entry.parentPath ?: "根目录",
@@ -93,6 +107,10 @@ class ReaderViewModel : ViewModel() {
                         sizeLabel = Format.bytes(r.entry.size),
                         blobSha = r.entry.blobSha,
                         changedLabel = Format.relativeTime(r.entry.observedChangedAt),
+                        readingPosition = restoreReadingPosition(
+                            AppGraph.database.noteMetadataDao().get(r.entry.repoId, path),
+                            r.entry.blobSha, r.document.blocks.size + 2,
+                        ),
                     )
                     observeFavorite(path)
                 }

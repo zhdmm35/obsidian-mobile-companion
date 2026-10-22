@@ -95,7 +95,13 @@ export function createSync({ vaultPath, log = () => {}, runGit = makeRunner(vaul
     } catch {
       upstream = null;
     }
-    const remote = upstream ? upstream.split('/')[0] : 'origin';
+    // 读取 Git 的实际跟踪配置：本地分支名、远端分支名和 fetch 后的引用名可以不同。
+    const remote = upstream
+      ? (await runGit(['config', '--get', `branch.${branch}.remote`])).stdout.trim()
+      : 'origin';
+    const remoteRef = upstream
+      ? (await runGit(['config', '--get', `branch.${branch}.merge`])).stdout.trim()
+      : null;
     const headBefore = (await runGit(['rev-parse', 'HEAD'])).stdout.trim();
 
     // 3. fetch + rebase；冲突时 abort，保留本地 commit，明确报错
@@ -117,7 +123,7 @@ export function createSync({ vaultPath, log = () => {}, runGit = makeRunner(vaul
 
     // 4. push（无 upstream 的分支用 -u 建立跟踪）
     if (upstream) {
-      await runGit(['push', remote, branch]);
+      await runGit(['push', remote, `HEAD:${remoteRef}`]);
     } else {
       await runGit(['push', '-u', remote, branch]);
     }

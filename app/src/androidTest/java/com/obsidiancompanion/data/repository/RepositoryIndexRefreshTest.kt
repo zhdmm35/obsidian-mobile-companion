@@ -43,9 +43,9 @@ class RepositoryIndexRefreshTest {
     /** 假时钟：refreshTree 的 freshness window 全部走这个时间。 */
     private var fakeNow = 1_000_000L
 
-    private fun treeJson(sha: String = "r${System.nanoTime()}") =
+    private fun treeJson(sha: String = "r${System.nanoTime()}", blobSha: String = "a1") =
         MockResponse().addHeader("Content-Type", "application/json")
-            .setBody("""{"sha":"$sha","truncated":false,"tree":[{"path":"A.md","type":"blob","sha":"a1","size":3}]}""")
+            .setBody("""{"sha":"$sha","truncated":false,"tree":[{"path":"A.md","type":"blob","sha":"$blobSha","size":3}]}""")
 
     @Before
     fun setUp() = runTest {
@@ -97,6 +97,34 @@ class RepositoryIndexRefreshTest {
         db.repoEntryDao().updateBlobAfterSave("o/r", "A.md", "saved", 8L, System.currentTimeMillis() + 1)
         assertTrue(refresh.await() is RefreshOutcome.Success)
         assertEquals("saved", db.repoEntryDao().get("o/r", "A.md")!!.blobSha)
+    }
+
+    @Test
+    fun deferredLocalWrite_doesNotCacheEtagBeforeRemoteSnapshotIsApplied() = runTest {
+        db.repoEntryDao().insertAll(listOf(com.obsidiancompanion.data.metadata.entities.RepoEntryEntity(
+            "o/r", "A.md", "A.md", null,
+            com.obsidiancompanion.data.metadata.entities.EntryKind.MARKDOWN, "a1", 3L, null,
+        )))
+        val etag = "\"remote-c\""
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse =
+                if (request.getHeader("If-None-Match") == etag) {
+                    MockResponse().setResponseCode(304).addHeader("ETag", etag)
+                } else {
+                    treeJson("root-c", "remote-c").addHeader("ETag", etag)
+                        .setBodyDelay(500, TimeUnit.MILLISECONDS)
+                }
+        }
+        val refresh = async { repository.refreshTree(force = true) }
+        withContext(Dispatchers.IO) { assertTrue(server.takeRequest(5, TimeUnit.SECONDS) != null) }
+        db.repoEntryDao().updateBlobAfterSave("o/r", "A.md", "saved-b", 8L, System.currentTimeMillis())
+        assertTrue(refresh.await() is RefreshOutcome.Success)
+        assertEquals("saved-b", db.repoEntryDao().get("o/r", "A.md")!!.blobSha)
+
+        assertTrue(repository.refreshTree(force = true) is RefreshOutcome.Success)
+        assertEquals("remote-c", db.repoEntryDao().get("o/r", "A.md")!!.blobSha)
+        org.junit.Assert.assertNull(server.takeRequest().getHeader("If-None-Match"))
+        assertEquals(etag, db.repositoryStateDao().get("o/r")!!.etag)
     }
 
     @Test

@@ -68,6 +68,25 @@ class MetadataDaoTest {
     }
 
     @Test
+    fun readingPositionIsScopedAndPreservesFavoriteAndReadTime() = runTest {
+        val dao = db.noteMetadataDao()
+        dao.setFavorite("repoA", "A.md", true)
+        dao.markRead("repoA", "A.md", 222L)
+        dao.saveReadingPosition("repoA", "A.md", "sha1", 12, 48)
+        dao.saveReadingPosition("repoB", "A.md", "sha2", 3, 10)
+        assertEquals(12, dao.get("repoA", "A.md")!!.readingItemIndex)
+        assertEquals(48, dao.get("repoA", "A.md")!!.readingScrollOffset)
+        assertEquals(3, dao.get("repoB", "A.md")!!.readingItemIndex)
+        dao.setFavorite("repoA", "A.md", false)
+        dao.markRead("repoA", "A.md", 333L)
+        assertEquals("sha1", dao.get("repoA", "A.md")!!.readingBlobSha)
+        assertEquals(12, dao.get("repoA", "A.md")!!.readingItemIndex)
+        assertEquals(333L, dao.get("repoA", "A.md")!!.lastReadAt)
+        assertFalse(dao.get("repoA", "A.md")!!.isFavorite)
+        assertNull(dao.get("repoA", "B.md"))
+    }
+
+    @Test
     fun recentReadOrderedDesc() = runTest {
         val dao = db.noteMetadataDao()
         dao.markRead("o/r", "A.md", 100L)
@@ -210,9 +229,9 @@ class MetadataDaoTest {
         context.deleteDatabase(name)
         try {
             seedHistoricalDatabase(name, 2)
-            migrationHelper.runMigrationsAndValidate(name, 3, true, AppDatabase.MIGRATION_2_3).close()
+            migrationHelper.runMigrationsAndValidate(name, 4, true, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).close()
             Room.databaseBuilder(context, AppDatabase::class.java, name)
-                .addMigrations(AppDatabase.MIGRATION_2_3).build().let { upgraded ->
+                .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build().let { upgraded ->
                     try {
                         assertEquals("sha", upgraded.repoEntryDao().get("o/r", "A.md")!!.blobSha)
                         assertTrue(upgraded.noteMetadataDao().observeOne("o/r", "A.md").first()!!.isFavorite)
@@ -233,10 +252,10 @@ class MetadataDaoTest {
         context.deleteDatabase(name)
         try {
             seedHistoricalDatabase(name, 1)
-            migrationHelper.runMigrationsAndValidate(name, 3, true,
-                AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).close()
+            migrationHelper.runMigrationsAndValidate(name, 4, true,
+                AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).close()
             Room.databaseBuilder(context, AppDatabase::class.java, name)
-                .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3).build().let { upgraded ->
+                .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4).build().let { upgraded ->
                     try {
                         assertEquals("sha", upgraded.repoEntryDao().get("o/r", "A.md")!!.blobSha)
                         assertTrue(upgraded.noteMetadataDao().observeOne("o/r", "A.md").first()!!.isFavorite)
@@ -248,6 +267,31 @@ class MetadataDaoTest {
         } finally { context.deleteDatabase(name) }
     }
 
+    @Test
+    fun migrationFromVersion3KeepsMetadataAndDraftsAndInitializesReadingPosition() = runTest {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val name = "migration-reading-position-test.db"
+        context.deleteDatabase(name)
+        try {
+            seedHistoricalDatabase(name, 3)
+            migrationHelper.runMigrationsAndValidate(name, 4, true, AppDatabase.MIGRATION_3_4).close()
+            val upgraded = Room.databaseBuilder(context, AppDatabase::class.java, name)
+                .addMigrations(AppDatabase.MIGRATION_3_4).build()
+            try {
+                val metadata = upgraded.noteMetadataDao().get("o/r", "A.md")!!
+                assertTrue(metadata.isFavorite)
+                assertNull(metadata.readingBlobSha)
+                assertEquals(0, metadata.readingItemIndex)
+                assertEquals(0, metadata.readingScrollOffset)
+                assertEquals("edited", upgraded.pendingEditDao().get("o/r", "A.md")!!.content)
+                assertEquals("capture body", upgraded.captureDraftDao().get("capture")!!.text)
+                upgraded.noteMetadataDao().saveReadingPosition("o/r", "A.md", "sha", 4, 20)
+                assertTrue(upgraded.noteMetadataDao().get("o/r", "A.md")!!.isFavorite)
+                assertEquals(4, upgraded.noteMetadataDao().get("o/r", "A.md")!!.readingItemIndex)
+            } finally { upgraded.close() }
+        } finally { context.deleteDatabase(name) }
+    }
+
     /** 从固定 JSON 建旧库，未来修改当前 Entity 也不会改写测试的历史结构。 */
     private fun seedHistoricalDatabase(name: String, version: Int) {
         migrationHelper.createDatabase(name, version).use { old ->
@@ -255,6 +299,7 @@ class MetadataDaoTest {
             old.execSQL("INSERT INTO note_user_metadata VALUES ('o/r', 'A.md', NULL, 1)")
             old.execSQL("INSERT INTO recent_searches VALUES ('o/r', 'keyword', 2)")
             if (version >= 2) old.execSQL("INSERT INTO pending_edits VALUES ('o/r', 'A.md', 'sha', 'edited', 3)")
+            if (version >= 3) old.execSQL("INSERT INTO capture_drafts VALUES ('capture', 'capture body', 'name', '', 4)")
         }
     }
 

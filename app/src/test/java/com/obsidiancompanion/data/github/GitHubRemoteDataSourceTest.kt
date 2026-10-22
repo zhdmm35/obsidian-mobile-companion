@@ -203,6 +203,34 @@ class GitHubRemoteDataSourceTest {
     }
 
     @Test
+    fun getTree_layeredLimitWithPendingSubtrees_doesNotReturnPartialSuccess() = runTest {
+        server.enqueue(json("""{"sha":"root","truncated":true,"tree":[]}"""))
+        val entries = (1..100_000).joinToString(",") { index ->
+            """{"path":"dir$index","type":"tree","sha":"d$index"}"""
+        }
+        server.enqueue(json("""{"sha":"root","truncated":false,"tree":[$entries]}"""))
+
+        assertEquals(GitHubResult.Fail(DomainError.MalformedResponse), remote.getTree("o", "r", "main", null))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun getTree_layeredLimitAllowsCompleteTreeButRejectsOversizedLayer() = runTest {
+        for (count in listOf(100_000, 100_001)) {
+            server.enqueue(json("""{"sha":"root","truncated":true,"tree":[]}"""))
+            val entries = (1..count).joinToString(",") { index ->
+                """{"path":"note$index.md","type":"blob","sha":"b$index","size":1}"""
+            }
+            server.enqueue(json("""{"sha":"root","truncated":false,"tree":[$entries]}"""))
+            val result = remote.getTree("o", "r", "main", null)
+            if (count == 100_000) {
+                assertTrue(result is GitHubResult.Ok)
+                assertEquals(count, (result as GitHubResult.Ok).value.entries.size)
+            } else assertEquals(GitHubResult.Fail(DomainError.MalformedResponse), result)
+        }
+    }
+
+    @Test
     fun getTree_403RateLimited() = runTest {
         server.enqueue(MockResponse().setResponseCode(403).addHeader("X-RateLimit-Remaining", "0"))
         assertEquals(

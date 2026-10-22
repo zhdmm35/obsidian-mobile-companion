@@ -1,6 +1,7 @@
 package com.obsidiancompanion.data.metadata.entities
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.PrimaryKey
 
 /** Repository Tree 条目类型（§17：按扩展名从 Tree API 结果构建 UI 类型）。 */
@@ -33,6 +34,9 @@ data class NoteUserMetadataEntity(
     val path: String,
     val lastReadAt: Long?,
     val isFavorite: Boolean = false,
+    val readingBlobSha: String? = null,
+    @ColumnInfo(defaultValue = "0") val readingItemIndex: Int = 0,
+    @ColumnInfo(defaultValue = "0") val readingScrollOffset: Int = 0,
 )
 
 /** 最近搜索（§28）：同 query 重复提交只更新时间；每仓库最多展示 10 条。 */

@@ -100,6 +100,38 @@ test('remote ahead (phone commit): periodic pull via rebase fast-forward', async
   assert.equal(pulled.trim(), 'phone'); // autocrlf 会把 LF 转成 CRLF，只比内容
 });
 
+test('different local branch: pull and push the configured upstream without creating a stray branch', async (t) => {
+  const { work, phone, rem } = await makeSandbox(t);
+  await sh(work, ['branch', '-m', 'desktop']);
+  await sh(work, ['remote', 'rename', 'origin', 'notes']);
+  await writeFile(path.join(phone, 'from-phone.md'), 'phone\n');
+  await sh(phone, ['add', '-A']);
+  await sh(phone, ['commit', '-m', 'mobile: new note']);
+  await sh(phone, ['push']);
+  await writeFile(path.join(work, 'from-desktop.md'), 'desktop\n');
+
+  const result = await createSync({ vaultPath: work }).syncOnce('manual');
+
+  assert.equal(result.committed, 1);
+  assert.equal(result.pulled, true);
+  assert.equal(await rev(work), await rev(rem));
+  assert.equal((await sh(rem, ['show', 'main:from-desktop.md'])).stdout.trim(), 'desktop');
+  assert.equal((await readFile(path.join(work, 'from-phone.md'), 'utf8')).trim(), 'phone');
+  assert.equal((await sh(rem, ['for-each-ref', '--format=%(refname)', 'refs/heads/desktop'])).stdout.trim(), '');
+});
+
+test('upstream refspec: push to the configured remote branch when its tracking ref has a different name', async (t) => {
+  const { work, rem } = await makeSandbox(t);
+  await sh(work, ['config', 'remote.origin.fetch', '+refs/heads/main:refs/remotes/origin/notes/main']);
+  await sh(work, ['fetch', 'origin']);
+  await writeFile(path.join(work, 'a.md'), 'desktop update\n');
+
+  await createSync({ vaultPath: work }).syncOnce('manual');
+
+  assert.equal(await rev(work), await rev(rem));
+  assert.equal((await sh(rem, ['for-each-ref', '--format=%(refname)', 'refs/heads/notes'])).stdout.trim(), '');
+});
+
 test('rebase conflict: abort, keep local commit, never overwrite remote', async (t) => {
   const { work, phone, rem } = await makeSandbox(t);
   // 手机改同一行并先推

@@ -197,15 +197,11 @@ class NoteRepository(
             }
         }
 
-    /** §18「使用我的修改」：重新获取最新 remote SHA（§45 Use Mine）→ 再用我的正文 PUT —— 用户明确确认的覆盖。 */
-    suspend fun resolveConflictUseMine(path: String, myContent: String): NoteSaveResult =
+    /** 仅替换用户在冲突页看见的版本；展示之后远端再次变化时，由 PUT 的 SHA 校验返回冲突。 */
+    suspend fun resolveConflictUseMine(path: String, myContent: String, expectedRemoteSha: String): NoteSaveResult =
         withContext(Dispatchers.Default) {
             val ctx = writeContext() ?: return@withContext NoteSaveResult.Error(DomainError.Unknown)
-            when (val latest = remote.getFileContent(ctx.owner, ctx.repo, path)) {
-                is GitHubResult.Ok -> putAndConverge(ctx, path, myContent, latest.value.sha)
-                is GitHubResult.Fail -> NoteSaveResult.Error(latest.error)
-                is GitHubResult.NotModified -> NoteSaveResult.Error(DomainError.Unknown)
-            }
+            putAndConverge(ctx, path, myContent, expectedRemoteSha)
         }
 
     /** §18「使用 GitHub 版本」：放弃手机修改 —— 远端正文写缓存 + entry 指向远端 SHA + 清 draft。 */

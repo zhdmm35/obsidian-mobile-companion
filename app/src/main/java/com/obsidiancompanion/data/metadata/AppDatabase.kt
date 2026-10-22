@@ -33,7 +33,7 @@ import com.obsidiancompanion.data.metadata.entities.RepositoryStateEntity
         PendingEditEntity::class,
         CaptureDraftEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -45,6 +45,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun captureDraftDao(): CaptureDraftDao
 
     companion object {
+
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE note_user_metadata ADD COLUMN readingBlobSha TEXT")
+                db.execSQL("ALTER TABLE note_user_metadata ADD COLUMN readingItemIndex INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE note_user_metadata ADD COLUMN readingScrollOffset INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         internal val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -66,7 +74,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "app_metadata.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

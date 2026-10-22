@@ -255,7 +255,7 @@ class NoteRepositoryWriteTest {
     /* ── §45 Use Mine：fetch DEF → PUT using DEF → success ────── */
 
     @Test
-    fun conflictThenUseMine_fetchesLatestShaAndPuts() = runTest {
+    fun conflictThenUseMine_putsTheRemoteVersionShownToTheUser() = runTest {
         // 1) 保存 → 409（draft 保留）
         server.enqueue(MockResponse().setResponseCode(409))
         assertTrue(repository.saveNote(path, "abc123", "我的修改 🚀") is NoteSaveResult.Conflict)
@@ -267,9 +267,10 @@ class NoteRepositoryWriteTest {
             MockResponse().addHeader("Content-Type", "application/json")
                 .setBody("""{"sha":"def456","encoding":"base64","content":"$b64"}"""),
         )
+        val displayed = repository.fetchRemoteVersion(path) as NoteRepository.RemoteNoteVersion.Ready
         server.enqueue(json200("ghi789"))
 
-        val r = repository.resolveConflictUseMine(path, "我的修改 🚀")
+        val r = repository.resolveConflictUseMine(path, "我的修改 🚀", displayed.sha)
         assertTrue(r is NoteSaveResult.Saved)
         assertEquals("ghi789", (r as NoteSaveResult.Saved).newSha)
 
@@ -289,14 +290,15 @@ class NoteRepositoryWriteTest {
 
     @Test
     fun useMine_secondConflict_staysConflict() = runTest {
-        val b64 = java.util.Base64.getEncoder().encodeToString("remote".toByteArray())
-        server.enqueue(
-            MockResponse().addHeader("Content-Type", "application/json")
-                .setBody("""{"sha":"def456","content":"$b64"}"""),
-        )
+        repository.stagePendingEdit(path, "abc123", "mine")
         server.enqueue(MockResponse().setResponseCode(409))
-        val r = repository.resolveConflictUseMine(path, "mine")
+        val r = repository.resolveConflictUseMine(path, "mine", "displayed-sha")
         assertTrue(r is NoteSaveResult.Conflict) // 远端又变了 —— 仍不静默覆盖
+        val request = server.takeRequest()
+        assertEquals("PUT", request.method)
+        assertEquals("displayed-sha", json.parseToJsonElement(request.body.readUtf8()).jsonObject["sha"]!!.jsonPrimitive.content)
+        assertEquals(1, server.requestCount) // 不能悄悄 GET 新 SHA 绕过用户确认。
+        assertEquals("mine", repository.getPendingEdit(path)!!.content)
     }
 
     /* ── §45 Use Remote：discard mine → cache remote → Reader remote ── */

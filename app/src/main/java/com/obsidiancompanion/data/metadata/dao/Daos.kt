@@ -72,6 +72,17 @@ interface RepositoryStateDao {
 @Dao
 interface NoteMetadataDao {
 
+    @Query("SELECT * FROM note_user_metadata WHERE repoId = :repoId AND path = :path")
+    suspend fun get(repoId: String, path: String): NoteUserMetadataEntity?
+
+    /** 阅读位置只写本机，不改变收藏、阅读时间或 GitHub 正文。 */
+    @Query(
+        "INSERT INTO note_user_metadata(repoId, path, lastReadAt, isFavorite, readingBlobSha, readingItemIndex, readingScrollOffset) " +
+            "VALUES (:repoId, :path, NULL, 0, :sha, :itemIndex, :scrollOffset) " +
+            "ON CONFLICT(repoId, path) DO UPDATE SET readingBlobSha = :sha, readingItemIndex = :itemIndex, readingScrollOffset = :scrollOffset",
+    )
+    suspend fun saveReadingPosition(repoId: String, path: String, sha: String, itemIndex: Int, scrollOffset: Int)
+
     @Query("SELECT * FROM note_user_metadata WHERE repoId = :repoId AND isFavorite = 1")
     fun observeFavorites(repoId: String): Flow<List<NoteUserMetadataEntity>>
 

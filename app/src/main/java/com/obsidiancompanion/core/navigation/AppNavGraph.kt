@@ -241,6 +241,7 @@ fun AppNavGraph() {
                 SearchScreen(
                     onBack = { navController.popBackStack() },
                     onOpenNote = { openNote(it) },
+                    onManageOffline = { navController.navigate(Routes.FILES) { launchSingleTop = true } },
                 )
             }
             composable(Routes.SETTINGS) {

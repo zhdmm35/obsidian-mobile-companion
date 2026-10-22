@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -49,11 +52,13 @@ import com.obsidiancompanion.data.repository.NoteRepository
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.model.DomainError
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 冲突处理（Phase 5 §15-§18/§53）：保存时 base SHA 过期（远端在编辑期间被修改）后进入。
  * 我的修改 = PendingEdit 暂存（保存前写入，崩溃也安全）；GitHub 版本 = 实时拉取的远端最新。
- * 不做 diff / 3-way merge / 自动覆盖；只有两个用户明确操作：使用我的修改 / 使用 GitHub 版本。
+ * 按行展示差异；使用我的修改时以用户看见的远端 SHA 保存，再次变化则重新确认。
  */
 class ConflictViewModel : ViewModel() {
 
@@ -65,6 +70,8 @@ class ConflictViewModel : ViewModel() {
             val folder: String,
             val mine: String,
             val remote: String,
+            val remoteSha: String,
+            val difference: ConflictDiff,
             val resolving: Boolean = false,
         ) : State
         data class Error(val message: String) : State
@@ -96,6 +103,8 @@ class ConflictViewModel : ViewModel() {
                     folder = path.substringBeforeLast('/', "").ifEmpty { "根目录" },
                     mine = draft.content,
                     remote = r.content,
+                    remoteSha = r.sha,
+                    difference = withContext(Dispatchers.Default) { conflictLineDiff(r.content, draft.content) },
                 )
                 is NoteRepository.RemoteNoteVersion.Error -> state = State.Error(
                     when (r.error) {
@@ -116,7 +125,7 @@ class ConflictViewModel : ViewModel() {
         if (!AppGraph.network.isOnline) { onMessage("当前没有网络连接"); return }
         state = ready.copy(resolving = true)
         viewModelScope.launch {
-            when (val r = AppGraph.noteRepository.resolveConflictUseMine(ready.path, ready.mine)) {
+            when (val r = AppGraph.noteRepository.resolveConflictUseMine(ready.path, ready.mine, ready.remoteSha)) {
                 is NoteSaveResult.Saved -> {
                     AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree() }
                     onMessage("已保存")
@@ -198,6 +207,8 @@ fun ConflictScreen(
                 folder = "工作 / AI",
                 mine = ConflictDemo.LOCAL,
                 remote = ConflictDemo.REMOTE,
+                remoteSha = "demo",
+                difference = conflictLineDiff(ConflictDemo.REMOTE, ConflictDemo.LOCAL),
             )
         } else {
             null
@@ -212,7 +223,7 @@ fun ConflictScreen(
     if (showOverwriteConfirm) {
         ConfirmationDialog(
             title = "使用我的修改",
-            message = "确定使用手机上的修改覆盖 GitHub 最新版本？", // §54
+            message = "确定用手机上的修改替换当前展示的 GitHub 版本？如果远端又有新修改，会重新加载供你确认。",
             confirmText = "确定覆盖",
             onConfirm = {
                 showOverwriteConfirm = false
@@ -306,7 +317,7 @@ private fun ConflictReadyContent(
         Text(state.folder, style = AppTypography.caption, color = AppColors.textTertiary, modifier = Modifier.padding(top = 3.dp))
     }
 
-    // 版本 Tab（§53：我的修改 / GitHub 版本）
+    // 先展示差异，仍可分别阅读两份完整正文。
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -317,13 +328,16 @@ private fun ConflictReadyContent(
             ),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        VersionTab(label = "我的修改", selected = selectedTab == 0, onClick = { onSelectTab(0) }, modifier = Modifier.weight(1f))
-        VersionTab(label = "GitHub 版本", selected = selectedTab == 1, onClick = { onSelectTab(1) }, modifier = Modifier.weight(1f))
+        VersionTab(label = "差异", selected = selectedTab == 0, onClick = { onSelectTab(0) }, modifier = Modifier.weight(1f))
+        VersionTab(label = "我的修改", selected = selectedTab == 1, onClick = { onSelectTab(1) }, modifier = Modifier.weight(1f))
+        VersionTab(label = "GitHub 版本", selected = selectedTab == 2, onClick = { onSelectTab(2) }, modifier = Modifier.weight(1f))
     }
 
     // 版本预览（mono / 暖沙底 / 限高滚动）
-    Text(
-        text = if (selectedTab == 0) state.mine else state.remote,
+    if (selectedTab == 0) {
+        ConflictDiffPreview(state.difference)
+    } else SelectionContainer { Text(
+        text = if (selectedTab == 1) state.mine else state.remote,
         style = AppTypography.codeInline,
         color = AppColors.textSecondary,
         modifier = Modifier
@@ -338,7 +352,7 @@ private fun ConflictReadyContent(
             .padding(AppSpacing.lg)
             .heightIn(max = 320.dp)
             .verticalScroll(rememberScrollState()),
-    )
+    ) }
 
     // 两个明确操作（§18）；resolving 时禁用防重复提交
     PrimaryButton(
@@ -362,6 +376,34 @@ private fun ConflictReadyContent(
             top = 10.dp,
         ),
     )
+}
+
+@Composable
+private fun ConflictDiffPreview(diff: ConflictDiff) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = AppSpacing.screenPaddingHorizontal, vertical = 10.dp)) {
+        Text("− GitHub 版本中的行    + 我的修改中的行", style = AppTypography.caption, color = AppColors.textTertiary)
+        if (diff.simplified) {
+            Text("变化范围较大，已整体标记；可切换版本查看全文。", style = AppTypography.caption, color = AppColors.textTertiary)
+        }
+        if (diff.lines.none { it.kind != ConflictLineKind.UNCHANGED }) {
+            Text("两个版本的正文没有行差异", style = AppTypography.bodySmall, color = AppColors.textSecondary,
+                modifier = Modifier.padding(vertical = 8.dp))
+        }
+        SelectionContainer {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(min = 80.dp, max = 320.dp)
+                .clip(AppShapes.small).background(AppColors.surfaceWarm)) {
+                items(diff.lines) { line ->
+                    val (prefix, color, background) = when (line.kind) {
+                        ConflictLineKind.REMOTE_ONLY -> Triple("− ", AppColors.danger, AppColors.calloutDangerBg)
+                        ConflictLineKind.MINE_ONLY -> Triple("+ ", AppColors.success, AppColors.calloutSuccessBg)
+                        ConflictLineKind.UNCHANGED -> Triple("  ", AppColors.textSecondary, AppColors.surfaceWarm)
+                    }
+                    Text(prefix + line.text, style = AppTypography.codeInline, color = color,
+                        modifier = Modifier.fillMaxWidth().background(background).padding(horizontal = 10.dp, vertical = 2.dp))
+                }
+            }
+        }
+    }
 }
 
 /** 冲突页卡片：surface 底 + 边框 + 屏幕左右 padding（说明卡 / 冲突文件卡共用）。 */

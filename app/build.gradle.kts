@@ -76,6 +76,12 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// 新数据库版本的 schema 由 KSP 生成，首次构建也必须在打包设备测试 assets 前就绪。
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("AndroidTestAssets") }.configureEach {
+    val variant = name.removePrefix("merge").removeSuffix("AndroidTestAssets")
+    dependsOn("ksp${variant}Kotlin")
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")

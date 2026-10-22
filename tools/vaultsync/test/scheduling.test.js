@@ -14,6 +14,7 @@ test('automatic triggers merge behind an active sync while manual requests keep 
       if (flows === 1) { started(); await gate; }
       return { stdout: 'main' };
     }
+    if (args[0] === 'config') return { stdout: args[2].endsWith('.remote') ? 'origin' : 'refs/heads/main' };
     return { stdout: args[0] === 'rev-parse' ? (args.includes('@{u}') ? 'origin/main' : 'head') : '' };
   };
   const { syncOnce, idle } = createSync({ vaultPath: '.', runGit });
@@ -34,6 +35,7 @@ test('a failed automatic sync releases scheduling state for a later retry', asyn
   let failed = true;
   const runGit = async (args) => {
     if (args[0] === 'symbolic-ref') return { stdout: 'main' };
+    if (args[0] === 'config') return { stdout: args[2].endsWith('.remote') ? 'origin' : 'refs/heads/main' };
     if (args[0] === 'fetch' && failed) throw new Error('network');
     return { stdout: args[0] === 'rev-parse' ? (args.includes('@{u}') ? 'origin/main' : 'head') : '' };
   };

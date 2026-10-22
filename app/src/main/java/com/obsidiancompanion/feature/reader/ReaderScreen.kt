@@ -16,6 +16,9 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +33,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.obsidiancompanion.AppGraph
 import com.obsidiancompanion.R
 import com.obsidiancompanion.core.design.AppColors
@@ -47,6 +53,10 @@ import com.obsidiancompanion.model.markdown.MdBlock
 import com.obsidiancompanion.model.markdown.MdInline
 import com.obsidiancompanion.model.markdown.findHeadingIndex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -120,18 +130,20 @@ fun ReaderScreen(
             Spacer(Modifier.weight(1f))
         }
 
-        is ReaderUiState.Content -> ReaderContent(
-            state = state,
-            anchor = anchor,
-            onBack = onBack,
-            onEdit = onEdit,
-            onOpenNote = onOpenNote,
-            onOpenImage = onOpenImage,
-            onOpenExternalUrl = onOpenExternalUrl,
-            onShare = onShare,
-            onShowSnackbar = onShowSnackbar,
-            viewModel = viewModel,
-        )
+        is ReaderUiState.Content -> key(state.repoId, state.path, state.blobSha) {
+            ReaderContent(
+                state = state,
+                anchor = anchor,
+                onBack = onBack,
+                onEdit = onEdit,
+                onOpenNote = onOpenNote,
+                onOpenImage = onOpenImage,
+                onOpenExternalUrl = onOpenExternalUrl,
+                onShare = onShare,
+                onShowSnackbar = onShowSnackbar,
+                viewModel = viewModel,
+            )
+        }
     }
 }
 
@@ -156,6 +168,7 @@ private fun ReaderTopBar(onBack: () -> Unit, onMore: (() -> Unit)?, onOutline: (
 }
 
 @Composable
+@OptIn(FlowPreview::class)
 private fun ReaderContent(
     state: ReaderUiState.Content,
     anchor: String?,
@@ -182,7 +195,31 @@ private fun ReaderContent(
         value = AppGraph.settings.flow.firstOrNull()?.canWrite
     }
 
-    val listState = rememberLazyListState()
+    val initialPosition = if (anchor == null) state.readingPosition else ReadingPosition()
+    val listState = rememberLazyListState(initialPosition.itemIndex, initialPosition.scrollOffset)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(listState, lifecycleOwner) {
+        val savePosition = {
+            viewModel.saveReadingPosition(state, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) savePosition()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            savePosition()
+        }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            if (listState.layoutInfo.totalItemsCount > 0) {
+                ReadingPosition(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            } else null
+        }.filterNotNull().distinctUntilChanged().debounce(500).collect { position ->
+            viewModel.saveReadingPosition(state, position.itemIndex, position.scrollOffset)
+        }
+    }
 
     // 同笔记锚点滚动信号（§19：[[#H]] 当前 Reader 内滚动，不 push 新实例）
     var sameNoteAnchor by remember { mutableStateOf<String?>(null) }
