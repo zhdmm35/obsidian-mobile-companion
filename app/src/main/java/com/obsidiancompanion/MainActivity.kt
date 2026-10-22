@@ -10,6 +10,7 @@ import com.obsidiancompanion.core.navigation.AppNavGraph
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -38,7 +39,8 @@ class MainActivity : ComponentActivity() {
             val app = applicationContext
             AppGraph.appScope.launch {
                 try {
-                    val draft = AppGraph.captureDraft.create(text, com.obsidiancompanion.feature.capture.defaultCaptureTitle(text))
+                    val folder = AppGraph.settings.flow.first().captureFolder
+                    val draft = AppGraph.captureDraft.create(text, com.obsidiancompanion.feature.capture.defaultCaptureTitle(text), folder)
                     AppGraph.pendingCaptureId.value = draft.id // 落盘成功后才打开收集页。
                 } catch (e: CancellationException) {
                     throw e

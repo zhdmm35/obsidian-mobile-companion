@@ -31,6 +31,16 @@ The v0.1.3 release is an installable prerelease for real-world feedback. Test it
 
 分享草稿改名/目录约 250 ms 合并写入；正常返回会等待保存，切后台会安排立即写入。强制结束进程或断电仍可能丢失尚未落盘的输入。
 
+## 当前开发版：后台暂存与 Inbox 收集
+
+1. 编辑后不等 1.5 秒就切后台，重新打开并恢复草稿，核对最后输入；再验证「丢弃修改并退出」后不会重新出现草稿。正常切后台会立即安排写入，强制结束进程或断电仍不能保证尚未完成的落盘。
+2. 分享内容并修改目录，切后台或返回后再次分享，确认新分享沿用该仓库的目录；打开旧草稿时原位置不变。切换仓库，确认目录记忆互不影响。
+3. 在收集页选择「追加到 Inbox.md」，确认弹窗显示完整目标路径；取消不上传。确认后已有正文保留，缺失的文件自动创建，收集草稿仅在成功后删除。
+4. 在电脑与手机同时修改 Inbox，确认版本冲突时提示重试且保留收集草稿；手机已有同路径的编辑草稿时，追加不应覆盖或删除它。
+5. 模拟上传后响应中断，再次追加同一条草稿，确认只写入一次；两次独立分享相同正文应保留两份。
+
+Inbox 源文件会保留形如 `<!-- inkstone-capture:… -->` 的隐藏注释，阅读时不显示，用于识别已成功追加的分享。手工删除该标记后，旧草稿重试将无法识别之前的上传。
+
 ## What to report
 
 Use the [beta feedback issue form](.github/ISSUE_TEMPLATE/beta_feedback.yml). Include device model, Android version, app version, test scenario, expected result, actual result, and sanitized logs. Do not include tokens, private repository URLs, or private note content.

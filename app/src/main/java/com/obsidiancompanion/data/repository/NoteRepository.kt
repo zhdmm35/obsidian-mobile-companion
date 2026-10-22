@@ -1,6 +1,7 @@
 package com.obsidiancompanion.data.repository
 
 import com.obsidiancompanion.data.cache.ContentCache
+import com.obsidiancompanion.data.capture.CaptureAppend
 import com.obsidiancompanion.data.github.GitHubRemoteDataSource
 import com.obsidiancompanion.data.github.GitHubResult
 import com.obsidiancompanion.data.markdown.MarkdownParser
@@ -141,15 +142,19 @@ class NoteRepository(
      * 保存已有 Markdown（§3/§6）：draft 暂存 → PUT(base sha) → 成功收敛 / 冲突与失败保留 draft。
      * baseSha 为编辑 session 进入时冻结的 blob SHA（§39），不是进入 Editor 后再查的「当前」值。
      */
-    override suspend fun saveNote(path: String, baseSha: String, content: String): NoteSaveResult =
+    override suspend fun saveNote(path: String, baseSha: String, content: String, expectedRepoId: String?): NoteSaveResult =
         withContext(Dispatchers.Default) {
-            val ctx = writeContext() ?: return@withContext NoteSaveResult.Error(DomainError.Unknown)
+            val ctx = writeContext()
+            // 校验失败也先保留最新输入；切换/断开仓库后仍写入原编辑会话的草稿。
+            val draftRepo = expectedRepoId ?: ctx?.repoId
+            if (draftRepo != null) stageDraft(draftRepo, path, baseSha, content)
+            if (ctx == null) return@withContext NoteSaveResult.Error(DomainError.Unknown)
+            if (expectedRepoId != null && ctx.repoId != expectedRepoId) {
+                return@withContext NoteSaveResult.Error(DomainError.Unknown)
+            }
             val entry = index.getEntry(ctx.repoId, path)
                 ?: return@withContext NoteSaveResult.Error(DomainError.NotFound)
             if (entry.kind != EntryKind.MARKDOWN) return@withContext NoteSaveResult.Error(DomainError.NotFound)
-
-            // §20：真正发送 GitHub Write 前先暂存（写入失败 / 冲突 / 保存过程中崩溃均可恢复）
-            stageDraft(ctx.repoId, path, baseSha, content)
 
             putAndConverge(ctx, path, content, baseSha)
         }
@@ -161,9 +166,12 @@ class NoteRepository(
      * 成功后本地立即收敛：正文写 ContentCache + Tree 插入新 entry（Reader/Editor 即刻可开），
      * 整树由调用方异步 refreshTree 补齐（如新目录的 DIRECTORY 行）。
      */
-    suspend fun createNote(path: String, content: String): NoteSaveResult =
+    suspend fun createNote(path: String, content: String, expectedRepoId: String? = null): NoteSaveResult =
         withContext(Dispatchers.Default) {
             val ctx = writeContext() ?: return@withContext NoteSaveResult.Error(DomainError.Unknown)
+            if (expectedRepoId != null && ctx.repoId != expectedRepoId) {
+                return@withContext NoteSaveResult.Error(DomainError.Unknown)
+            }
             if (index.getEntry(ctx.repoId, path) != null) {
                 return@withContext NoteSaveResult.Conflict(path)
             }
@@ -172,21 +180,7 @@ class NoteRepository(
             val message = "mobile: create ${path.substringAfterLast('/')}"
             when (val r = remote.createFile(ctx.owner, ctx.repo, path, bytes, message, ctx.branch)) {
                 is GitHubResult.Ok -> {
-                    cache.put(r.value.newSha, bytes)
-                    db.repoEntryDao().insertAll(
-                        listOf(
-                            RepoEntryEntity(
-                                repoId = ctx.repoId,
-                                path = path,
-                                name = path.substringAfterLast('/'),
-                                parentPath = path.substringBeforeLast('/', missingDelimiterValue = "").takeIf { it.isNotEmpty() },
-                                kind = EntryKind.MARKDOWN,
-                                blobSha = r.value.newSha,
-                                size = bytes.size.toLong(),
-                                observedChangedAt = System.currentTimeMillis(),
-                            ),
-                        ),
-                    )
+                    insertSavedContent(ctx.repoId, path, r.value.newSha, bytes)
                     NoteSaveResult.Saved(path, r.value.newSha, r.value.commitSha)
                 }
                 is GitHubResult.Fail -> when (r.error) {
@@ -196,6 +190,55 @@ class NoteRepository(
                 is GitHubResult.NotModified -> NoteSaveResult.Error(DomainError.Unknown) // PUT 不会 304；防御分支
             }
         }
+
+    /** 从指定分支读取最新 Inbox，再用 SHA 追加；不触碰同路径的编辑草稿。 */
+    suspend fun appendCapture(
+        path: String,
+        draftId: String,
+        text: String,
+        expectedRepoId: String,
+    ): NoteSaveResult = withContext(Dispatchers.Default) {
+        val ctx = writeContext() ?: return@withContext NoteSaveResult.Error(DomainError.Unknown)
+        if (ctx.repoId != expectedRepoId) return@withContext NoteSaveResult.Error(DomainError.Unknown)
+        var sha: String? = null
+        val existing = when (val latest = remote.getFileContent(ctx.owner, ctx.repo, path, ctx.branch)) {
+            is GitHubResult.Ok -> {
+                sha = latest.value.sha
+                val content = try {
+                    Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(latest.value.bytes)).toString()
+                } catch (e: java.nio.charset.CharacterCodingException) {
+                    // 不能把无效字节替换成 � 后写回，损坏原文件。
+                    return@withContext NoteSaveResult.Error(DomainError.MalformedResponse)
+                }
+                if (CaptureAppend.alreadyAppended(content, draftId)) {
+                    insertSavedContent(ctx.repoId, path, latest.value.sha, latest.value.bytes)
+                    return@withContext NoteSaveResult.Saved(path, latest.value.sha, null)
+                }
+                content
+            }
+            is GitHubResult.Fail -> {
+                if (latest.error != DomainError.NotFound) return@withContext NoteSaveResult.Error(latest.error)
+                ""
+            }
+            is GitHubResult.NotModified -> return@withContext NoteSaveResult.Error(DomainError.Unknown)
+        }
+        val bytes = CaptureAppend.append(existing, draftId, text).toByteArray(Charsets.UTF_8)
+        val message = "mobile: append capture to ${path.substringAfterLast('/')}"
+        val result = if (sha == null) {
+            remote.createFile(ctx.owner, ctx.repo, path, bytes, message, ctx.branch)
+        } else {
+            remote.updateFile(ctx.owner, ctx.repo, path, bytes, sha, message, ctx.branch)
+        }
+        when (result) {
+            is GitHubResult.Ok -> {
+                insertSavedContent(ctx.repoId, path, result.value.newSha, bytes)
+                NoteSaveResult.Saved(path, result.value.newSha, result.value.commitSha)
+            }
+            is GitHubResult.Fail -> if (result.error == DomainError.Conflict) NoteSaveResult.Conflict(path)
+                else NoteSaveResult.Error(result.error)
+            is GitHubResult.NotModified -> NoteSaveResult.Error(DomainError.Unknown)
+        }
+    }
 
     /** 仅替换用户在冲突页看见的版本；展示之后远端再次变化时，由 PUT 的 SHA 校验返回冲突。 */
     suspend fun resolveConflictUseMine(path: String, myContent: String, expectedRemoteSha: String): NoteSaveResult =
@@ -226,9 +269,9 @@ class NoteRepository(
     }
 
     /** 编辑中自动暂存（§21 扩展）：防抖写入 pending_edits，杀进程/切后台后内容仍可恢复。 */
-    override suspend fun stagePendingEdit(path: String, baseSha: String, content: String) {
-        val repoId = settings.flow.firstOrNull()?.repoId ?: return
-        stageDraft(repoId, path, baseSha, content)
+    override suspend fun stagePendingEdit(path: String, baseSha: String, content: String, repoId: String?) {
+        val targetRepo = repoId ?: settings.flow.firstOrNull()?.repoId ?: return
+        stageDraft(targetRepo, path, baseSha, content)
     }
 
     /** 冲突页展示用：远端最新版本（sha + 正文，§16）。 */
@@ -241,9 +284,9 @@ class NoteRepository(
         }
     }
 
-    override suspend fun clearPendingEdit(path: String) {
-        val repoId = settings.flow.firstOrNull()?.repoId ?: return
-        db.pendingEditDao().delete(repoId, path)
+    override suspend fun clearPendingEdit(path: String, repoId: String?) {
+        val targetRepo = repoId ?: settings.flow.firstOrNull()?.repoId ?: return
+        db.pendingEditDao().delete(targetRepo, path)
     }
 
     override suspend fun getCachedContent(sha: String): String? = cache.get(sha)?.toString(Charsets.UTF_8)
@@ -292,6 +335,20 @@ class NoteRepository(
     private suspend fun applySavedContent(repoId: String, path: String, newSha: String, bytes: ByteArray) {
         cache.put(newSha, bytes)
         db.repoEntryDao().updateBlobAfterSave(repoId, path, newSha, bytes.size.toLong(), System.currentTimeMillis())
+    }
+
+    private suspend fun insertSavedContent(repoId: String, path: String, newSha: String, bytes: ByteArray) {
+        cache.put(newSha, bytes)
+        db.repoEntryDao().insertAll(listOf(RepoEntryEntity(
+            repoId = repoId,
+            path = path,
+            name = path.substringAfterLast('/'),
+            parentPath = path.substringBeforeLast('/', missingDelimiterValue = "").takeIf { it.isNotEmpty() },
+            kind = EntryKind.MARKDOWN,
+            blobSha = newSha,
+            size = bytes.size.toLong(),
+            observedChangedAt = System.currentTimeMillis(),
+        )))
     }
 
     private suspend fun stageDraft(repoId: String, path: String, baseSha: String, content: String) {

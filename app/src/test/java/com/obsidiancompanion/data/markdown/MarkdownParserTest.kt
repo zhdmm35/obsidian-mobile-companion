@@ -16,6 +16,13 @@ import org.junit.Test
  */
 class MarkdownParserTest {
 
+    @Test fun captureMarkersAreHiddenButOtherHtmlAndCodeArePreserved() {
+        val marker = com.obsidiancompanion.data.capture.CaptureAppend.marker("draft")
+        assertEquals(2, parseBlocks("before\n\n$marker\n\nafter").size)
+        assertEquals("<!-- user comment -->", firstParagraphText("<!-- user comment -->"))
+        assertEquals(marker, (parseBlocks("```\n$marker\n```").single() as MdBlock.CodeBlock).code)
+    }
+
     private fun parseBlocks(src: String): List<MdBlock> = MarkdownParser.parse(src).blocks
 
     private fun firstParagraphText(src: String): String =

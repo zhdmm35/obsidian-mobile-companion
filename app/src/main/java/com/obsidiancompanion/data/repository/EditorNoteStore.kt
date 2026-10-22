@@ -7,7 +7,7 @@ interface EditorNoteStore {
     suspend fun openNote(path: String): NoteOpenResult
     suspend fun getPendingEdit(path: String): PendingEditEntity?
     suspend fun getCachedContent(sha: String): String?
-    suspend fun stagePendingEdit(path: String, baseSha: String, content: String)
-    suspend fun clearPendingEdit(path: String)
-    suspend fun saveNote(path: String, baseSha: String, content: String): NoteSaveResult
+    suspend fun stagePendingEdit(path: String, baseSha: String, content: String, repoId: String? = null)
+    suspend fun clearPendingEdit(path: String, repoId: String? = null)
+    suspend fun saveNote(path: String, baseSha: String, content: String, expectedRepoId: String? = null): NoteSaveResult
 }

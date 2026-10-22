@@ -56,9 +56,9 @@ object AppGraph {
     val editorViewModelFactory by lazy {
         viewModelFactory {
             initializer {
-                EditorViewModel(noteRepository, { network.isOnline }) {
+                EditorViewModel(noteRepository, { network.isOnline }, {
                     appScope.launch { indexRepository.refreshTree() }
-                }
+                }, backgroundScope = appScope)
             }
         }
     }

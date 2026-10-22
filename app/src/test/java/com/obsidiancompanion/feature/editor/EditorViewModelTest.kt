@@ -40,6 +40,99 @@ class EditorViewModelTest {
     private fun editor(online: Boolean = true): EditorViewModel =
         EditorViewModel(notes, { online }, { refreshed++ }).also { store.put("editor", it); it.load("A.md") }
 
+    @Test fun backgroundImmediatelyStagesTextWithoutWaitingForDebounce() = runTest {
+        val editor = editor()
+        runCurrent()
+        editor.onValueChange(TextFieldValue("just typed"))
+        editor.onBackground()
+        runCurrent()
+        assertEquals("just typed", notes.pending!!.content)
+        assertEquals("indexed", notes.pending!!.baseSha)
+        assertTrue(editor.draftStaged)
+    }
+
+    @Test fun backgroundUsesTheRepositoryOfTheLoadedNoteAfterSettingsChange() = runTest {
+        val editor = editor()
+        runCurrent()
+        notes.currentRepo = "switched/repo"
+        editor.onValueChange(TextFieldValue("original repository edit"))
+        editor.onBackground()
+        runCurrent()
+        assertEquals("o/r", notes.pending!!.repoId)
+    }
+
+    @Test fun backgroundWriteSurvivesEditorDestruction() = runTest {
+        val editor = EditorViewModel(notes, { true }, {}, backgroundScope)
+        store.put("editor", editor)
+        editor.load("A.md")
+        runCurrent()
+        notes.stageGate = CompletableDeferred()
+        editor.onValueChange(TextFieldValue("keep after closing"))
+        editor.onBackground()
+        runCurrent()
+        store.clear()
+        notes.stageGate!!.complete(Unit)
+        runCurrent()
+        assertEquals("keep after closing", notes.pending!!.content)
+    }
+
+    @Test fun saveWaitsForBackgroundWriteAndDoesNotResurrectDraft() = runTest {
+        val editor = editor()
+        runCurrent()
+        notes.stageGate = CompletableDeferred()
+        editor.onValueChange(TextFieldValue("edit"))
+        editor.onBackground()
+        runCurrent()
+        editor.save({}, {}, {})
+        runCurrent()
+        assertEquals(0, notes.saveCalls)
+        notes.stageGate!!.complete(Unit)
+        runCurrent()
+        assertEquals(1, notes.saveCalls)
+        assertNull(notes.pending)
+    }
+
+    @Test fun backgroundDoesNotDeleteUnrestoredDraftOrFlushWhileSaving() = runTest {
+        notes.pending = PendingEditEntity("o/r", "A.md", "oldbase", "old draft", 1L)
+        val editor = editor()
+        runCurrent()
+        editor.keepDraft()
+        editor.onBackground()
+        runCurrent()
+        assertEquals("old draft", notes.pending!!.content)
+        editor.onValueChange(TextFieldValue("new edit"))
+        notes.gate = CompletableDeferred()
+        editor.save({}, {}, {})
+        runCurrent()
+        editor.onBackground()
+        notes.gate!!.complete(Unit)
+        runCurrent()
+        assertNull(notes.pending)
+    }
+
+    @Test fun backgroundFailureKeepsTextAndReportsLocalFailure() = runTest {
+        val editor = editor()
+        runCurrent()
+        notes.stageException = IOException("disk full")
+        editor.onValueChange(TextFieldValue("copy me"))
+        editor.onBackground()
+        runCurrent()
+        assertEquals("copy me", editor.value.text)
+        assertFalse(editor.draftStaged)
+        assertFalse(editor.saveFailure!!.locallySaved)
+    }
+
+    @Test fun stoppingAfterDiscardDoesNotRecreateTheDiscardedDraft() = runTest {
+        val editor = editor()
+        runCurrent()
+        editor.onValueChange(TextFieldValue("discard me"))
+        editor.discardAndLeave {}
+        runCurrent()
+        editor.onBackground()
+        runCurrent()
+        assertNull(notes.pending)
+    }
+
     @Test fun successfulSave_usesFrozenBaseAndRefreshesOnce() = runTest {
         val editor = editor()
         runCurrent()
@@ -147,20 +240,25 @@ class EditorViewModelTest {
         var saveCalls = 0
         var savedBase: String? = null
         var savedText: String? = null
+        var stageGate: CompletableDeferred<Unit>? = null
+        var stageException: Throwable? = null
+        var currentRepo = "o/r"
         override suspend fun openNote(path: String): NoteOpenResult = NoteOpenResult.Content(
             path, "base", MdDocument(null, emptyList()), true,
             RepoEntryEntity("o/r", path, path, null, EntryKind.MARKDOWN, "indexed", 4L, null), 1L,
         )
         override suspend fun getPendingEdit(path: String) = pending
         override suspend fun getCachedContent(sha: String) = "base"
-        override suspend fun stagePendingEdit(path: String, baseSha: String, content: String) {
-            pending = PendingEditEntity("o/r", path, baseSha, content, 1L)
+        override suspend fun stagePendingEdit(path: String, baseSha: String, content: String, repoId: String?) {
+            stageGate?.await()
+            stageException?.let { throw it }
+            pending = PendingEditEntity(repoId ?: currentRepo, path, baseSha, content, 1L)
         }
-        override suspend fun clearPendingEdit(path: String) { pending = null }
-        override suspend fun saveNote(path: String, baseSha: String, content: String): NoteSaveResult {
+        override suspend fun clearPendingEdit(path: String, repoId: String?) { pending = null }
+        override suspend fun saveNote(path: String, baseSha: String, content: String, expectedRepoId: String?): NoteSaveResult {
             saveCalls++
             saveException?.let { throw it }
-            stagePendingEdit(path, baseSha, content)
+            stagePendingEdit(path, baseSha, content, expectedRepoId)
             savedBase = baseSha
             savedText = content
             gate?.await()

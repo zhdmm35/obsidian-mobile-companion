@@ -114,7 +114,9 @@ object MarkdownParser {
         is IndentedCodeBlock -> listOf(MdBlock.CodeBlock(null, ObsidianSyntax.restoreInCode(child.literal).trimEnd('\n')))
         is ThematicBreak -> listOf(MdBlock.HorizontalRule)
         is TableBlock -> listOf(convertTable(child))
-        is HtmlBlock -> listOf(MdBlock.Paragraph(listOf(MdInline.Text(child.literal.trim()))))
+        is HtmlBlock -> if (com.obsidiancompanion.data.capture.CaptureAppend.isMarker(child.literal.trim())) {
+            emptyList()
+        } else listOf(MdBlock.Paragraph(listOf(MdInline.Text(child.literal.trim()))))
         is Document -> convertBlocks(child)
         else -> {
             // 未知节点兜底：收集纯文本成段，内容不丢

@@ -111,10 +111,10 @@ class GitHubRemoteDataSource(
         }
 
     /** JSON 形态 Contents read：远端最新 sha + Base64 正文（冲突流程用，§16-18）。 */
-    suspend fun getFileContent(owner: String, repo: String, path: String): GitHubResult<RemoteFileContent> =
+    suspend fun getFileContent(owner: String, repo: String, path: String, ref: String? = null): GitHubResult<RemoteFileContent> =
         withContext(Dispatchers.IO) {
             runGuarded {
-                val resp = api.getContent(contentsUrl(owner, repo, path))
+                val resp = api.getContent(contentsUrl(owner, repo, path, ref))
                 val body = resp.body()
                 when {
                     resp.isSuccessful && body != null -> {
@@ -201,13 +201,14 @@ class GitHubRemoteDataSource(
     }
 
     /** repos/{o}/{r}/contents/{path…}：路径按段编码（空格→%20，CJK→UTF-8 百分号，'/' 保留为分隔符）。 */
-    private fun contentsUrl(owner: String, repo: String, path: String): okhttp3.HttpUrl =
+    private fun contentsUrl(owner: String, repo: String, path: String, ref: String? = null): okhttp3.HttpUrl =
         baseUrl.newBuilder()
             .addPathSegments("repos")
             .addPathSegment(owner)
             .addPathSegment(repo)
             .addPathSegments("contents")
             .addPathSegments(path)
+            .apply { if (ref != null) addQueryParameter("ref", ref) }
             .build()
 
     /** 非递归逐层展开（truncated fallback）：从 root tree 开始按子树 SHA 逐层获取。 */

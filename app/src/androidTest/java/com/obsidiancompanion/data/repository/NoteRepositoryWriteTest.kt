@@ -122,6 +122,103 @@ class NoteRepositoryWriteTest {
             .addHeader("Content-Type", "application/json")
             .setBody("""{"content":{"sha":"$newSha"},"commit":{"sha":"$commitSha"}}""")
 
+    private fun remoteContent(sha: String, text: String): MockResponse {
+        val encoded = java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))
+        return MockResponse().setBody("""{"sha":"$sha","encoding":"base64","content":"$encoded"}""")
+    }
+
+    @Test fun appendUsesLatestBranchShaAndPreservesEditorDraft() = runTest {
+        settings.setRepository("o", "r", "notes/mobile")
+        repository.stagePendingEdit(path, "abc123", "unsaved editor text")
+        db.noteMetadataDao().setFavorite("o/r", path, true)
+        server.enqueue(remoteContent("latestsha", "# Inbox\r\n原文\r\n"))
+        server.enqueue(json200("appendedsha"))
+        assertTrue(repository.appendCapture(path, "capture1", "分享 🎉", "o/r") is NoteSaveResult.Saved)
+        val get = server.takeRequest()
+        assertEquals("notes/mobile", get.requestUrl!!.queryParameter("ref"))
+        val put = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("latestsha", put["sha"]!!.jsonPrimitive.content)
+        assertEquals("notes/mobile", put["branch"]!!.jsonPrimitive.content)
+        val text = java.util.Base64.getDecoder().decode(put["content"]!!.jsonPrimitive.content).toString(Charsets.UTF_8)
+        assertTrue(text.startsWith("# Inbox\r\n原文\r\n"))
+        assertTrue(text.contains("分享 🎉"))
+        assertEquals(text, cache.get("appendedsha")!!.toString(Charsets.UTF_8))
+        assertEquals("appendedsha", db.repoEntryDao().get("o/r", path)!!.blobSha)
+        assertEquals("unsaved editor text", repository.getPendingEdit(path)!!.content)
+        assertTrue(db.noteMetadataDao().get("o/r", path)!!.isFavorite)
+    }
+
+    @Test fun appendRetryRecognizesRemoteSuccessWithoutAnotherPut() = runTest {
+        val uploaded = com.obsidiancompanion.data.capture.CaptureAppend.append("original", "capture1", "share")
+        server.enqueue(remoteContent("alreadyuploaded", uploaded))
+        assertTrue(repository.appendCapture("Inbox.md", "capture1", "share", "o/r") is NoteSaveResult.Saved)
+        assertEquals(1, server.requestCount)
+        assertEquals("GET", server.takeRequest().method)
+        assertEquals("alreadyuploaded", db.repoEntryDao().get("o/r", "Inbox.md")!!.blobSha)
+    }
+
+    @Test fun appendCreatesMissingInboxWithoutShaAndDoesNotOverwriteRacingCreate() = runTest {
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(json200("createdinbox"))
+        assertTrue(repository.appendCapture("Inbox.md", "capture1", "share", "o/r") is NoteSaveResult.Saved)
+        server.takeRequest()
+        val create = json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertNull(create["sha"])
+        assertEquals("createdinbox", db.repoEntryDao().get("o/r", "Inbox.md")!!.blobSha)
+        server.enqueue(MockResponse().setResponseCode(404))
+        server.enqueue(MockResponse().setResponseCode(422))
+        assertTrue(repository.appendCapture("Racing/Inbox.md", "capture2", "share", "o/r") is NoteSaveResult.Conflict)
+        assertNull(db.repoEntryDao().get("o/r", "Racing/Inbox.md"))
+    }
+
+    @Test fun appendConflictAndReadErrorLeaveLocalDataUntouched() = runTest {
+        repository.stagePendingEdit(path, "abc123", "editor draft")
+        server.enqueue(remoteContent("latestsha", "remote"))
+        server.enqueue(MockResponse().setResponseCode(409))
+        assertTrue(repository.appendCapture(path, "capture1", "share", "o/r") is NoteSaveResult.Conflict)
+        assertEquals("abc123", db.repoEntryDao().get("o/r", path)!!.blobSha)
+        assertEquals("editor draft", repository.getPendingEdit(path)!!.content)
+        server.enqueue(MockResponse().setResponseCode(403))
+        assertTrue(repository.appendCapture(path, "capture1", "share", "o/r") is NoteSaveResult.Error)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test fun appendRefusesInvalidUtf8RatherThanChangingExistingBytes() = runTest {
+        server.enqueue(MockResponse().setBody("""{"sha":"remote","encoding":"base64","content":"/w=="}"""))
+        val result = repository.appendCapture(path, "capture1", "share", "o/r") as NoteSaveResult.Error
+        assertEquals(DomainError.MalformedResponse, result.error)
+        assertEquals(1, server.requestCount)
+        assertEquals("abc123", db.repoEntryDao().get("o/r", path)!!.blobSha)
+    }
+
+    @Test fun captureWritesRejectChangedRepositoryBeforeSendingRequests() = runTest {
+        assertTrue(repository.appendCapture(path, "capture1", "share", "other/repo") is NoteSaveResult.Error)
+        assertTrue(repository.createNote("New.md", "share", "other/repo") is NoteSaveResult.Error)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test fun localDraftWritesRemainInTheirOriginalRepositoryAfterSwitch() = runTest {
+        repository.stagePendingEdit(path, "base", "other repo draft", "other/repo")
+        settings.setRepository("other", "repo", "main")
+        repository.stagePendingEdit(path, "abc123", "original repo draft", "o/r")
+        assertEquals("original repo draft", db.pendingEditDao().get("o/r", path)!!.content)
+        assertEquals("other repo draft", repository.getPendingEdit(path)!!.content)
+        repository.clearPendingEdit(path, "o/r")
+        assertEquals("other repo draft", repository.getPendingEdit(path)!!.content)
+        assertTrue(repository.saveNote(path, "abc123", "wrong destination", "o/r") is NoteSaveResult.Error)
+        assertEquals(0, server.requestCount)
+        assertEquals("wrong destination", db.pendingEditDao().get("o/r", path)!!.content)
+        assertEquals("other repo draft", db.pendingEditDao().get("other/repo", path)!!.content)
+    }
+
+    @Test fun saveWithMissingIndexStillPreservesLatestInputAsDraft() = runTest {
+        db.repoEntryDao().deleteByPaths("o/r", listOf(path))
+        val result = repository.saveNote(path, "abc123", "latest text", "o/r") as NoteSaveResult.Error
+        assertEquals(DomainError.NotFound, result.error)
+        assertEquals("latest text", db.pendingEditDao().get("o/r", path)!!.content)
+        assertEquals(0, server.requestCount)
+    }
+
     /* ── §45：baseSha ABC / remote ABC → save success ─────────── */
 
     @Test

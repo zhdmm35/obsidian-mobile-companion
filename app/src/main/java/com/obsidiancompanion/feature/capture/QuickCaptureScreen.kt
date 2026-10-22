@@ -26,6 +26,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,8 @@ import com.obsidiancompanion.core.design.AppTypography
 import com.obsidiancompanion.core.ui.AppIconButton
 import com.obsidiancompanion.core.ui.AppHorizontalDivider
 import com.obsidiancompanion.core.ui.PrimaryButton
+import com.obsidiancompanion.core.ui.SecondaryButton
+import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.feature.files.createWriteErrorMessage
 import com.obsidiancompanion.feature.files.isWindowsHostileSegment
@@ -118,7 +121,7 @@ fun sanitizeCaptureFolder(raw: String): String? {
 }
 
 /**
- * 快速收集（系统分享 → 新笔记）：预览 + 可改名/目录 + 保存。
+ * 快速收集（系统分享 → 新笔记或 Inbox）：预览 + 可改名/目录 + 保存。
  * 收到分享即落盘本机草稿（CaptureDraftStore，改名/目录修改同步更新）：
  * 离线可退出（联网后从首页「草稿中心」接着上传），杀进程后仍在；上传成功才清草稿。
  */
@@ -172,6 +175,17 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
         if (changed) persistDraft()
     }
 
+    val inboxPath: String? get() = sanitizeCaptureFolder(folderField.text)?.let {
+        if (it.isEmpty()) "Inbox.md" else "$it/Inbox.md"
+    }
+
+    private suspend fun updateDraft(id: String, name: String, folder: String) {
+        if (AppGraph.captureDraft.update(id, name, folder)) {
+            val normalized = sanitizeCaptureFolder(folder) ?: return
+            targetRepo?.let { AppGraph.settings.setCaptureFolder(it, normalized) }
+        }
+    }
+
     private fun persistDraft() {
         val id = draftId ?: return
         val name = nameField.text
@@ -180,7 +194,7 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
         // 合并快速输入；进程 scope 保证页面被导航销毁时已排队的写入仍可完成。
         pendingWrite = AppGraph.appScope.launch {
             delay(250)
-            try { AppGraph.captureDraft.update(id, name, folder) }
+            try { updateDraft(id, name, folder) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 withContext(Dispatchers.Main) { saveError = "改名或目录暂存失败，请重试" }
@@ -192,7 +206,7 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
         loadJob.join()
         pendingWrite?.cancelAndJoin()
         val id = draftId ?: return
-        AppGraph.captureDraft.update(id, nameField.text, folderField.text)
+        updateDraft(id, nameField.text, folderField.text)
     }
 
     fun onBackground() {
@@ -204,7 +218,7 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
             pendingWrite = AppGraph.appScope.launch {
                 try {
                     previous?.join()
-                    draftId?.let { AppGraph.captureDraft.update(it, name, folder) }
+                    draftId?.let { updateDraft(it, name, folder) }
                 }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { withContext(Dispatchers.Main) { saveError = "草稿暂存失败，请重试" } }
@@ -223,16 +237,17 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
         }
     }
 
-    fun save(onSaved: (String) -> Unit) {
+    fun save(appendToInbox: Boolean = false, onSaved: (String) -> Unit) {
         if (inFlight || loading) return
         offlineNotice = null
         saveError = null
         if (sharedText.isBlank()) { saveError = "分享内容已失效，请返回草稿中心"; return }
-        val fileName = sanitizeNoteName(nameField.text)
+        val fileName = if (appendToInbox) "Inbox.md" else sanitizeNoteName(nameField.text)
         if (fileName == null) { saveError = "名字不可用：不能为空，不含 / \\ :，也不以 . 开头"; return }
         val folder = sanitizeCaptureFolder(folderField.text)
         if (folder == null) { saveError = "文件夹路径不可用：用 / 分层，段名不以 . 开头"; return }
-        if (targetRepo == null) { saveError = "请先连接 GitHub 仓库"; return }
+        val repoId = targetRepo
+        if (repoId == null) { saveError = "请先连接 GitHub 仓库"; return }
         val path = if (folder.isEmpty()) fileName else "$folder/$fileName"
         inFlight = true
         viewModelScope.launch {
@@ -244,7 +259,14 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
                     offlineNotice = "当前离线 —— 内容已保存本机，联网后再点保存即可上传"
                     return@launch
                 }
-                when (val r = AppGraph.noteRepository.createNote(path, uploadedDraft.text)) {
+                if (AppGraph.settings.flow.first().repoId != repoId) {
+                    saveError = "仓库已切换，请返回后重新打开草稿，核对保存位置"
+                    return@launch
+                }
+                val result = if (appendToInbox) {
+                    AppGraph.noteRepository.appendCapture(path, uploadedDraft.id, uploadedDraft.text, repoId)
+                } else AppGraph.noteRepository.createNote(path, uploadedDraft.text, expectedRepoId = repoId)
+                when (val r = result) {
                     is NoteSaveResult.Saved -> {
                         try {
                             if (!AppGraph.captureDraft.clearIfUnchanged(uploadedDraft)) {
@@ -257,9 +279,11 @@ class QuickCaptureViewModel(private val savedStateHandle: SavedStateHandle) : Vi
                             return@launch
                         }
                         AppGraph.appScope.launch { AppGraph.indexRepository.refreshTree(force = true) }
-                        onSaved(fileName)
+                        onSaved(path)
                     }
-                    is NoteSaveResult.Conflict -> saveError = "同名笔记已存在，换个名字或文件夹吧"
+                    is NoteSaveResult.Conflict -> saveError = if (appendToInbox) {
+                        "Inbox 刚被修改，本机草稿已保留，请再次点击追加"
+                    } else "同名笔记已存在，换个名字或文件夹吧"
                     is NoteSaveResult.Error -> saveError = createWriteErrorMessage(r.error,
                         offline = "当前离线，内容已保存在本机，联网后再试", fallback = "保存失败，请稍后再试")
                 }
@@ -277,6 +301,24 @@ fun QuickCaptureScreen(
     onShowSnackbar: (String) -> Unit,
     viewModel: QuickCaptureViewModel = viewModel(),
 ) {
+    var showAppendConfirmation by remember { mutableStateOf(false) }
+    if (showAppendConfirmation) {
+        ConfirmationDialog(
+            title = "追加到 Inbox？",
+            message = "将本条内容追加到 ${viewModel.inboxPath ?: "Inbox.md"} 末尾。文件不存在时会新建，已有内容会保留。",
+            confirmText = "追加",
+            dismissText = "取消",
+            onConfirm = {
+                showAppendConfirmation = false
+                viewModel.save(appendToInbox = true) { path ->
+                    onShowSnackbar("已追加到 $path")
+                    onLeave()
+                }
+            },
+            onDismiss = { showAppendConfirmation = false },
+            onDismissRequest = { showAppendConfirmation = false },
+        )
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -385,7 +427,7 @@ fun QuickCaptureScreen(
                 placeholder = "如 Inbox 或 收集/网页",
                 enabled = !viewModel.inFlight && !viewModel.loading,
             )
-            Text("文件夹留空时保存在根目录，笔记名自动补 .md。", style = AppTypography.caption, color = AppColors.textTertiary)
+            Text("留空保存在根目录；下次分享会沿用此目录。新笔记名自动补 .md。", style = AppTypography.caption, color = AppColors.textTertiary)
 
             viewModel.saveError?.let {
                 Text(it, style = AppTypography.caption, color = AppColors.danger)
@@ -403,7 +445,7 @@ fun QuickCaptureScreen(
             verticalArrangement = Arrangement.spacedBy(AppSpacing.xs),
         ) {
             PrimaryButton(
-                text = if (viewModel.inFlight) "保存中…" else "保存到 GitHub",
+                text = if (viewModel.inFlight) "保存中…" else "新建笔记并保存",
                 onClick = {
                     viewModel.save { fileName ->
                         onShowSnackbar("已保存到 $fileName")
@@ -411,6 +453,12 @@ fun QuickCaptureScreen(
                     }
                 },
                 enabled = !viewModel.inFlight && !viewModel.loading,
+                block = true,
+            )
+            SecondaryButton(
+                text = "追加到 Inbox.md",
+                onClick = { showAppendConfirmation = true },
+                enabled = !viewModel.inFlight && !viewModel.loading && viewModel.inboxPath != null,
                 block = true,
             )
             Text("点击保存才会上传；返回会保留本机草稿。", style = AppTypography.caption, color = AppColors.textTertiary)

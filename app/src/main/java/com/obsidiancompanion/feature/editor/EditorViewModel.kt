@@ -14,12 +14,16 @@ import com.obsidiancompanion.data.repository.NoteOpenResult
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.model.DomainError
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 编辑器（Phase 5 正式态）：真实 Markdown source + 保存写回 GitHub。
@@ -31,6 +35,7 @@ class EditorViewModel(
     private val notes: EditorNoteStore,
     private val isOnline: () -> Boolean,
     private val refreshAfterSave: () -> Unit,
+    private val backgroundScope: CoroutineScope? = null,
 ) : ViewModel() {
 
     /** §14：Editor 至少 Editing / Saving；成功走回调（snackbar+导航），失败走 saveFailure 状态对话框。 */
@@ -84,7 +89,9 @@ class EditorViewModel(
     private var original: String? = ""
     private var draftOriginal: String? = null
     private var baseSha: String? = null
+    private var repoId: String? = null
     private var loadedPath: String? = null
+    private var leaving = false
 
     /** 加载完成前输入框禁用 —— 防止用户在 load 完成前打字被加载结果覆盖。 */
     var loaded by mutableStateOf(false)
@@ -118,6 +125,7 @@ class EditorViewModel(
                 is NoteOpenResult.Content -> {
                     // §39：冻结 base —— 之后 Tree refresh 不影响本次编辑
                     baseSha = r.entry.blobSha
+                    repoId = r.entry.repoId
                     original = r.markdown
                     resetText(r.markdown)
                     loaded = true
@@ -145,6 +153,7 @@ class EditorViewModel(
     fun restoreDraft() {
         val draft = pendingDraft ?: return
         baseSha = draft.baseSha
+        repoId = draft.repoId
         original = draftOriginal
         if (loaded) onValueChange(TextFieldValue(draft.content, TextRange(draft.content.length))) else resetText(draft.content)
         loaded = true
@@ -156,14 +165,53 @@ class EditorViewModel(
 
     /** 放弃恢复：明确丢弃暂存。 */
     fun dismissDraft() {
+        val draftRepo = pendingDraft?.repoId ?: repoId
         pendingDraft = null
         val path = loadedPath ?: return
-        viewModelScope.launch { notes.clearPendingEdit(path) }
+        viewModelScope.launch { notes.clearPendingEdit(path, draftRepo) }
     }
 
     /** 收起提示但保留草稿（点外部 / 系统返回）：下次进入仍会提示恢复。 */
     fun keepDraft() {
         pendingDraft = null
+    }
+
+    private val draftWriteMutex = Mutex()
+    private var backgroundWrite: Job? = null
+
+    /** ON_STOP 不等待防抖；进程级 scope 使页面销毁后已经开始的本机写入仍可完成。 */
+    fun onBackground() {
+        if (!loaded || leaving || saveState == SaveState.SAVING || pendingDraft != null) return
+        // 只看过正文或收起恢复提示时，保留原有的未恢复草稿。
+        if (!isDirty && !canUndo && !draftStaged) return
+        val path = loadedPath ?: return
+        val sha = baseSha ?: return
+        val text = value.text
+        val previous = backgroundWrite
+        backgroundWrite = (backgroundScope ?: viewModelScope).launch(Dispatchers.Main.immediate) {
+            previous?.join()
+            draftWriteMutex.withLock {
+                if (text == value.text) persistSnapshot(path, sha, text)
+            }
+        }
+    }
+
+    private suspend fun persistSnapshot(path: String, sha: String, text: String) {
+        try {
+            if (text == original) notes.clearPendingEdit(path, repoId)
+            else notes.stagePendingEdit(path, sha, text, repoId)
+            draftStaged = text == value.text && text != original
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            draftStaged = false
+            saveFailure = SaveFailure("本机暂存失败，请先复制全文", locallySaved = false)
+        }
+    }
+
+    private suspend fun finishDraftWrites() {
+        autoDraftJob?.cancelAndJoin()
+        backgroundWrite?.join()
     }
 
     /**
@@ -177,7 +225,8 @@ class EditorViewModel(
         val sha = baseSha ?: return
         if (saveState == SaveState.SAVING) return // 防连点（§14）
         if (!isDirty) {
-            if (canUndo || canRedo || draftStaged) discardAndLeave(onSaved) else onSaved()
+            if (canUndo || canRedo || draftStaged) discardAndLeave(onSaved)
+            else { leaving = true; onSaved() }
             return
         }
         if (!isOnline()) {
@@ -185,8 +234,8 @@ class EditorViewModel(
             saveState = SaveState.SAVING
             viewModelScope.launch {
                 try {
-                    autoDraftJob?.cancelAndJoin()
-                    notes.stagePendingEdit(path, sha, value.text)
+                    finishDraftWrites()
+                    notes.stagePendingEdit(path, sha, value.text, repoId)
                     draftStaged = true
                     saveFailure = SaveFailure("当前没有网络连接，无法保存到 GitHub")
                 } catch (e: CancellationException) {
@@ -203,8 +252,8 @@ class EditorViewModel(
         saveState = SaveState.SAVING
         viewModelScope.launch {
             try {
-                autoDraftJob?.cancelAndJoin()
-                when (val r = notes.saveNote(path, sha, value.text)) {
+                finishDraftWrites()
+                when (val r = notes.saveNote(path, sha, value.text, expectedRepoId = repoId)) {
                     is NoteSaveResult.Saved -> {
                         saveState = SaveState.EDITING
                         original = value.text // 已保存内容成为新基准：迟到的防抖发射走 clear 分支
@@ -212,6 +261,7 @@ class EditorViewModel(
                         // §13：不阻塞 UI 的异步整树收敛
                         refreshAfterSave()
                         onMessage("已保存到 GitHub") // 只声明可核实的事实（PUT 成功）
+                        leaving = true
                         onSaved()
                     }
                     is NoteSaveResult.Conflict -> {
@@ -257,9 +307,10 @@ class EditorViewModel(
         saveState = SaveState.SAVING
         viewModelScope.launch {
             try {
-                autoDraftJob?.cancelAndJoin()
-                if (keep) notes.stagePendingEdit(path, sha, value.text)
-                else notes.clearPendingEdit(path)
+                finishDraftWrites()
+                if (keep) notes.stagePendingEdit(path, sha, value.text, repoId)
+                else notes.clearPendingEdit(path, repoId)
+                leaving = true
                 onLeave() // 本机操作完成后才导航，避免 ViewModel 被销毁而中断落盘。
             } catch (e: CancellationException) {
                 throw e
@@ -273,13 +324,14 @@ class EditorViewModel(
     }
 
     /**
-     * 编辑中自动暂存（§21 扩展）：停笔 1.5s 后写入 pending_edits —— 杀进程 / 切后台不丢内容。
+     * 编辑中停笔 1.5s 后暂存；切后台由 onBackground 立即提交当前快照。
      * 改回原文时清除草稿（无未保存内容）；保存成功后 original 前移，
      * 迟到的防抖发射只会命中 clear 分支，不会把刚保存的内容复活成草稿。
      */
     @OptIn(FlowPreview::class)
     private fun startAutoDraft(path: String) {
         autoDraftJob?.cancel()
+        if (leaving) return
         autoDraftJob = viewModelScope.launch {
             snapshotFlow { value.text }
                 .drop(1) // 加载完成的初值不落草稿
@@ -287,19 +339,8 @@ class EditorViewModel(
                 .collect { text ->
                     val sha = baseSha ?: return@collect
                     if (saveState == SaveState.SAVING) return@collect // 保存飞行中输入已禁用，防御
-                    try {
-                        if (text == original) {
-                            notes.clearPendingEdit(path)
-                            draftStaged = false
-                        } else {
-                            notes.stagePendingEdit(path, sha, text)
-                            draftStaged = true
-                        }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        draftStaged = false
-                        saveFailure = SaveFailure("本机暂存失败，请先复制全文", locallySaved = false)
+                    draftWriteMutex.withLock {
+                        if (text == value.text && pendingDraft == null) persistSnapshot(path, sha, text)
                     }
                 }
         }

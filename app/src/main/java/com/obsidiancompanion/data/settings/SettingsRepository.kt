@@ -17,6 +17,8 @@ data class AppSettings(
     val autoRefresh: Boolean = true,
     /** 连接时记录的写权限（permissions.push）；null = 未知，编辑入口不拦截，由保存时的错误提示兜底。 */
     val canWrite: Boolean? = null,
+    /** 当前仓库最近使用的收集目录；仅给新分享预填，不修改已有草稿。 */
+    val captureFolder: String = "",
 ) {
     val repoId: String? get() = if (owner != null && repo != null) "$owner/$repo" else null
 }
@@ -30,6 +32,7 @@ private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 class SettingsRepository(private val context: Context) {
 
     val flow: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
+        val repoId = p[OWNER]?.let { owner -> p[REPO]?.let { "$owner/$it" } }
         AppSettings(
             owner = p[OWNER],
             repo = p[REPO],
@@ -37,6 +40,7 @@ class SettingsRepository(private val context: Context) {
             isOnboarded = p[ONBOARDED] ?: false,
             autoRefresh = p[AUTO_REFRESH] ?: true,
             canWrite = p[CAN_WRITE],
+            captureFolder = repoId?.let { p[captureFolderKey(it)] } ?: "",
         )
     }
 
@@ -57,6 +61,10 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { it[AUTO_REFRESH] = value }
     }
 
+    suspend fun setCaptureFolder(repoId: String, folder: String) {
+        context.settingsDataStore.edit { it[captureFolderKey(repoId)] = folder }
+    }
+
     /** 重连/重置 onboarding：清仓库选择与完成标记（保留 Token 与用户 metadata）。 */
     suspend fun clearRepository() {
         context.settingsDataStore.edit { p ->
@@ -69,6 +77,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     private companion object {
+        fun captureFolderKey(repoId: String) = stringPreferencesKey("capture_folder:$repoId")
         val OWNER = stringPreferencesKey("owner")
         val REPO = stringPreferencesKey("repo")
         val BRANCH = stringPreferencesKey("default_branch")
