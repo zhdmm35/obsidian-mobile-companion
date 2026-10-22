@@ -183,7 +183,7 @@ class EditorViewModel(
     fun onBackground() {
         if (!loaded || leaving || saveState == SaveState.SAVING || pendingDraft != null) return
         // 只看过正文或收起恢复提示时，保留原有的未恢复草稿。
-        if (!isDirty && !canUndo && !draftStaged) return
+        if (!isDirty && !canUndo && !canRedo && !draftStaged) return
         val path = loadedPath ?: return
         val sha = baseSha ?: return
         val text = value.text

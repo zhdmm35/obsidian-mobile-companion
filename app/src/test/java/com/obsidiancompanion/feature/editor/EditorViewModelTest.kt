@@ -61,6 +61,22 @@ class EditorViewModelTest {
         assertEquals("o/r", notes.pending!!.repoId)
     }
 
+    @Test fun backgroundAfterUndoToOriginalClearsThePreviousDraftImmediately() = runTest {
+        val editor = editor()
+        runCurrent()
+        editor.onValueChange(TextFieldValue("temporary edit"))
+        editor.onBackground()
+        runCurrent()
+        assertEquals("temporary edit", notes.pending!!.content)
+        editor.undo()
+        assertFalse(editor.isDirty)
+        assertFalse(editor.canUndo)
+        assertTrue(editor.canRedo)
+        editor.onBackground()
+        runCurrent()
+        assertNull(notes.pending)
+    }
+
     @Test fun backgroundWriteSurvivesEditorDestruction() = runTest {
         val editor = EditorViewModel(notes, { true }, {}, backgroundScope)
         store.put("editor", editor)
