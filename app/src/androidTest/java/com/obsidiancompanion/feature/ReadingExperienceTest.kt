@@ -16,6 +16,7 @@ import com.obsidiancompanion.data.mock.ConflictDemo
 import com.obsidiancompanion.data.metadata.entities.EntryKind
 import com.obsidiancompanion.data.metadata.entities.RepoEntryEntity
 import com.obsidiancompanion.data.settings.AppSettings
+import com.obsidiancompanion.data.settings.ReadingAppearance
 import com.obsidiancompanion.feature.sync.ConflictScreen
 import com.obsidiancompanion.feature.search.SearchScreen
 import com.obsidiancompanion.feature.search.SearchViewModel
@@ -24,6 +25,8 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +39,7 @@ class ReadingExperienceTest {
     private val repoId = "codex-ui-tests/reading-experience"
     private val path = "Inbox/Reading.md"
     private val sha = "readingexperiencecachedversion"
+    private val taskSha = "readingexperiencetaskversion"
     private var scenario: ActivityScenario<MainActivity>? = null
     private lateinit var prior: AppSettings
 
@@ -62,14 +66,17 @@ class ReadingExperienceTest {
         // 阅读位置在 appScope 写入，等待最后一次写入，再删除本测试作用域。
         SystemClock.sleep(300)
         AppGraph.database.repoEntryDao().deleteByRepo(repoId)
+        AppGraph.database.pendingEditDao().delete(repoId, path)
         AppGraph.database.openHelper.writableDatabase.execSQL("DELETE FROM note_user_metadata WHERE repoId = ?", arrayOf(repoId))
         AppGraph.contentCache.delete(sha)
+        AppGraph.contentCache.delete(taskSha)
         AppGraph.contentCache.delete("readingexperienceuncachedversion")
         if (prior.owner != null && prior.repo != null && prior.defaultBranch != null) {
             AppGraph.settings.setRepository(prior.owner!!, prior.repo!!, prior.defaultBranch!!, prior.canWrite)
         } else AppGraph.settings.clearRepository()
         AppGraph.settings.setOnboarded(prior.isOnboarded)
         AppGraph.settings.setAutoRefresh(prior.autoRefresh)
+        AppGraph.settings.setReadingAppearance(prior.readingAppearance)
     }
 
     @Test
@@ -121,6 +128,78 @@ class ReadingExperienceTest {
     }
 
     @Test
+    fun readingAppearancePersistsAcrossReopenAndCanBeReset() {
+        runBlocking { AppGraph.settings.setReadingAppearance(ReadingAppearance()) }
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        click("Reading")
+        click("更多")
+        click("阅读设置")
+        repeat(3) { click("增大字号") }
+        waitForText("字号 20")
+        click("宽松")
+        waitUntil { runBlocking { AppGraph.settings.flow.first().readingAppearance == ReadingAppearance(20, 115) } }
+        SystemClock.sleep(400)
+        screenshot("experience-appearance.png")
+        click("完成")
+        scenario!!.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        click("Reading")
+        click("更多")
+        click("阅读设置")
+        waitForText("字号 20")
+        click("恢复默认")
+        waitForText("字号 17")
+        waitUntil { runBlocking { AppGraph.settings.flow.first().readingAppearance == ReadingAppearance() } }
+    }
+
+    @Test
+    fun taskEntryTogglesNestedTasksAndRetainsExactDraftAfterLeaving() {
+        val source = "---\r\ntitle: tasks\r\n---\r\n# Reading\r\n\r\n- [ ] 检查同步\r\n\r\n> - [ ] 更新说明\r\n"
+        val expected = source.replace("[ ]", "[x]")
+        seedTaskNote(source)
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        click("Reading")
+        click("更多")
+        click("勾选任务")
+        waitForText("可勾选任务，完成后点「保存」同步。")
+        waitUntil { waitForText("任务：检查同步").isCheckable }
+        assertFalse(waitForText("任务：检查同步").isChecked)
+        click("任务：检查同步")
+        waitUntil { waitForText("任务：检查同步").isChecked }
+        click("任务：更新说明")
+        waitUntil { waitForText("任务：更新说明").isChecked }
+        SystemClock.sleep(400)
+        screenshot("experience-tasks.png")
+        click("返回编辑")
+        // TextField 的语义可能规范化换行；逐字验证交给持久化草稿。
+        waitForText("[x] 检查同步")
+        click("取消")
+        click("保留草稿并退出")
+        waitUntil { runBlocking { AppGraph.database.pendingEditDao().get(repoId, path)?.content == expected } }
+        assertEquals(expected, runBlocking { AppGraph.database.pendingEditDao().get(repoId, path)!!.content })
+        scenario!!.close()
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        click("Reading")
+        click("更多")
+        click("勾选任务")
+        click("恢复")
+        waitUntil { waitForText("任务：检查同步").isChecked && waitForText("任务：更新说明").isChecked }
+    }
+
+    @Test
+    fun readOnlyRepositoryBlocksTaskEditor() {
+        runBlocking {
+            AppGraph.settings.setRepository("codex-ui-tests", "reading-experience", "main", canWrite = false)
+        }
+        seedTaskNote("- [ ] 只读任务")
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        click("Reading")
+        click("更多")
+        click("勾选任务")
+        waitForText("当前 Token 只有只读权限")
+    }
+
+    @Test
     fun conflictShowsDifferencesAndBothCompleteVersions() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario!!.onActivity { activity ->
@@ -141,17 +220,36 @@ class ReadingExperienceTest {
     private fun waitForText(text: String): AccessibilityNodeInfo {
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
-            findText(instrumentation.uiAutomation.rootInActiveWindow, text)?.let { return it }
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            (findText(root, text, exact = true) ?: findText(root, text, exact = false))?.let { return it }
             SystemClock.sleep(100)
         }
         screenshot("experience-failure.png")
         error("UI text not found: $text")
     }
 
-    private fun findText(node: AccessibilityNodeInfo?, text: String): AccessibilityNodeInfo? {
+    private fun waitUntil(condition: () -> Boolean) {
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (condition()) return
+            SystemClock.sleep(100)
+        }
+        screenshot("experience-failure.png")
+        error("Timed out waiting for reading experience state")
+    }
+
+    private fun seedTaskNote(source: String) = runBlocking {
+        AppGraph.contentCache.put(taskSha, source.toByteArray())
+        AppGraph.database.repoEntryDao().insertAll(listOf(
+            RepoEntryEntity(repoId, path, "Reading.md", "Inbox", EntryKind.MARKDOWN, taskSha, source.length.toLong(), null),
+        ))
+    }
+
+    private fun findText(node: AccessibilityNodeInfo?, text: String, exact: Boolean): AccessibilityNodeInfo? {
         node ?: return null
-        if (node.text?.toString()?.contains(text) == true || node.contentDescription?.toString()?.contains(text) == true) return node
-        for (index in 0 until node.childCount) findText(node.getChild(index), text)?.let { return it }
+        fun matches(value: CharSequence?) = if (exact) value?.toString() == text else value?.toString()?.contains(text) == true
+        if (matches(node.text) || matches(node.contentDescription)) return node
+        for (index in 0 until node.childCount) findText(node.getChild(index), text, exact)?.let { return it }
         return null
     }
 

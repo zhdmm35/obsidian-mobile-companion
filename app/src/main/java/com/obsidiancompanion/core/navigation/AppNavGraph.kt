@@ -291,6 +291,7 @@ fun AppNavGraph() {
                         // Phase 5 §4：Reader → More → 编辑 → 既有 EditorScreen
                         navController.navigate(Routes.editor(URLEncoder.encode(decodedPath, "UTF-8")))
                     },
+                    onEditTasks = { navController.navigate(Routes.editor(URLEncoder.encode(decodedPath, "UTF-8"), tasks = true)) },
                     onOpenNote = { path, heading ->
                         openNote(path, heading)
                     },
@@ -324,6 +325,7 @@ fun AppNavGraph() {
                 arguments = listOf(
                     navArgument("noteId") { type = NavType.StringType },
                     navArgument("restoreDraft") { type = NavType.BoolType; defaultValue = false },
+                    navArgument("tasks") { type = NavType.BoolType; defaultValue = false },
                 ),
             ) { entry ->
                 val noteId = entry.arguments?.getString("noteId").orEmpty()
@@ -331,6 +333,7 @@ fun AppNavGraph() {
                 EditorScreen(
                     notePath = decodedPath,
                     restoreDraftOnLoad = entry.arguments?.getBoolean("restoreDraft") ?: false,
+                    taskMode = entry.arguments?.getBoolean("tasks") ?: false,
                     onLeave = { navController.popBackStack() },
                     onOpenConflict = {
                         navController.navigate(Routes.conflict(URLEncoder.encode(decodedPath, "UTF-8")))

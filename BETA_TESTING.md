@@ -50,6 +50,14 @@ Inbox 源文件会保留形如 `<!-- inkstone-capture:… -->` 的隐藏注释�
 5. 全部笔记 → 新建，输入笔记名并选择模板，预览标题与日期；创建后编辑器正文应与预览一致。空白模板继续创建空文件，同名笔记仍提示换名。
 6. 小屏、横屏和字体放大时，确认表单可以滚动，模板选项与确认/取消按钮可操作；跨午夜停留在今日笔记对话框时，确认仍使用展示的日期，重新打开后更新到新日期。
 
+## 当前开发版：阅读设置与任务勾选
+
+1. 阅读页 → 更多 → 阅读设置，连续调整字号并切换紧凑/标准/宽松行距；正文和预览应立即更新。关闭再打开应用、换另一篇笔记后应记住本机选择，「恢复默认」还原 17 号与标准行距。
+2. 小屏、横屏及系统字体放大时，确认设置内容可滚动，底部「完成」「恢复默认」可操作；调整样式不能改变笔记原文。
+3. 含任务的笔记 → 更多 → 勾选任务，连续勾选未完成和已完成项目；普通列表项不应变成复选框。嵌套列表、引用、Callout 内任务也应能操作，代码块和转义标记不能误修改。
+4. 返回编辑，撤销/重做勾选，核对 Frontmatter、CRLF、缩进及其余正文未改变。取消 → 保留草稿并退出，再进入并恢复，应保留任务状态；确认保存后才上传到 GitHub。
+5. 断网勾选并尝试保存，应保留本机草稿；电脑同时修改该笔记时，保存应进入现有冲突流程。只读仓库的「勾选任务」入口应显示权限说明。
+
 ## What to report
 
 Use the [beta feedback issue form](.github/ISSUE_TEMPLATE/beta_feedback.yml). Include device model, Android version, app version, test scenario, expected result, actual result, and sanitized logs. Do not include tokens, private repository URLs, or private note content.

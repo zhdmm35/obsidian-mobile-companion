@@ -2,6 +2,7 @@ package com.obsidiancompanion.feature.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
@@ -72,6 +77,8 @@ fun ReaderBlockRenderer(
     modifier: Modifier = Modifier,
     deadLinks: Set<String> = emptySet(),
     onOpenImage: (String) -> Unit = {},
+    onTaskToggle: ((MdBlock.TaskList.TaskItem) -> Unit)? = null,
+    taskEditingEnabled: Boolean = true,
 ) {
     when (block) {
         is MdBlock.Heading -> ReaderHeading(block, links, deadLinks, modifier)
@@ -88,6 +95,8 @@ fun ReaderBlockRenderer(
             currentNotePath = currentNotePath,
             deadLinks = deadLinks,
             onOpenImage = onOpenImage,
+            onTaskToggle = onTaskToggle,
+            taskEditingEnabled = taskEditingEnabled,
             modifier = modifier,
         )
         is MdBlock.OrderedList -> ReaderList(
@@ -97,11 +106,13 @@ fun ReaderBlockRenderer(
             currentNotePath = currentNotePath,
             deadLinks = deadLinks,
             onOpenImage = onOpenImage,
+            onTaskToggle = onTaskToggle,
+            taskEditingEnabled = taskEditingEnabled,
             modifier = modifier,
         )
-        is MdBlock.TaskList -> ReaderTaskList(block, links, currentNotePath, deadLinks, onOpenImage, modifier)
-        is MdBlock.Quote -> ReaderQuote(block, links, currentNotePath, deadLinks, onOpenImage, modifier)
-        is MdBlock.Callout -> ReaderCallout(block, links, currentNotePath, deadLinks, onOpenImage, modifier)
+        is MdBlock.TaskList -> ReaderTaskList(block, links, currentNotePath, deadLinks, onOpenImage, onTaskToggle, taskEditingEnabled, modifier)
+        is MdBlock.Quote -> ReaderQuote(block, links, currentNotePath, deadLinks, onOpenImage, onTaskToggle, taskEditingEnabled, modifier)
+        is MdBlock.Callout -> ReaderCallout(block, links, currentNotePath, deadLinks, onOpenImage, onTaskToggle, taskEditingEnabled, modifier)
         is MdBlock.CodeBlock -> ReaderCodeBlock(block, modifier)
         is MdBlock.Table -> ReaderTable(block, links, deadLinks, modifier)
         is MdBlock.Image -> ReaderNativeImage(block, currentNotePath, onOpenImage, modifier)
@@ -148,6 +159,8 @@ private fun ReaderList(
     currentNotePath: String,
     deadLinks: Set<String>,
     onOpenImage: (String) -> Unit,
+    onTaskToggle: ((MdBlock.TaskList.TaskItem) -> Unit)?,
+    taskEditingEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -160,7 +173,7 @@ private fun ReaderList(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = marker(index) ?: "•",
-                    style = AppTypography.bodyReader,
+                    style = readerTextStyle(AppTypography.bodyReader),
                     color = if (marker(index) == null) AppColors.textPrimary else AppColors.textTertiary,
                 )
                 Column(Modifier.weight(1f)) {
@@ -176,6 +189,8 @@ private fun ReaderList(
                             currentNotePath = currentNotePath,
                             deadLinks = deadLinks,
                             onOpenImage = onOpenImage,
+                            onTaskToggle = onTaskToggle,
+                            taskEditingEnabled = taskEditingEnabled,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -185,7 +200,7 @@ private fun ReaderList(
     }
 }
 
-/** 任务列表（原型 .tasks：18dp 勾选框，完成态删除线 + muted；V1 只读，§38） */
+/** 阅读页展示状态；编辑预览提供任务回调，48dp 点击区与独立勾选语义。 */
 @Composable
 private fun ReaderTaskList(
     block: MdBlock.TaskList,
@@ -193,6 +208,8 @@ private fun ReaderTaskList(
     currentNotePath: String,
     deadLinks: Set<String>,
     onOpenImage: (String) -> Unit,
+    onTaskToggle: ((MdBlock.TaskList.TaskItem) -> Unit)?,
+    taskEditingEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -203,17 +220,32 @@ private fun ReaderTaskList(
     ) {
         block.items.forEach { item ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 5.dp)
-                        .size(18.dp)
-                        .clip(AppShapes.checkbox)
-                        .background(if (item.done) AppColors.textPrimary else Color.Transparent)
-                        .border(1.5.dp, if (item.done) AppColors.textPrimary else AppColors.textMeta, AppShapes.checkbox),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (item.done) {
-                        Icon(AppIcons.Check, contentDescription = "已完成", tint = AppColors.surface, modifier = Modifier.size(13.dp))
+                if (!item.isTask) {
+                    Text(item.listMarker, style = readerTextStyle(AppTypography.bodyReader))
+                } else {
+                    val editable = taskEditingEnabled && onTaskToggle != null && item.sourceLine != null && item.sourceColumn != null
+                    Box(
+                        modifier = if (onTaskToggle != null) Modifier
+                            .size(48.dp)
+                            .semantics { contentDescription = "任务：${item.inlines.plainText()}" }
+                            .toggleable(value = item.done, enabled = editable, role = Role.Checkbox, onValueChange = { onTaskToggle(item) })
+                        else Modifier.padding(top = 5.dp).size(18.dp).semantics {
+                            stateDescription = if (item.done) "已完成" else "未完成"
+                            contentDescription = "任务：${item.inlines.plainText()}"
+                        },
+                        contentAlignment = if (onTaskToggle != null) Alignment.TopCenter else Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier.padding(top = if (onTaskToggle != null) 5.dp else 0.dp).size(18.dp)
+                                .clip(AppShapes.checkbox)
+                                .background(if (item.done) AppColors.textPrimary else Color.Transparent)
+                                .border(1.5.dp, if (item.done) AppColors.textPrimary else AppColors.textMeta, AppShapes.checkbox),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (item.done) {
+                                Icon(AppIcons.Check, contentDescription = null, tint = AppColors.surface, modifier = Modifier.size(13.dp))
+                            }
+                        }
                     }
                 }
                 Column(Modifier.weight(1f)) {
@@ -221,8 +253,8 @@ private fun ReaderTaskList(
                         inlines = item.inlines,
                         links = links,
                         deadLinks = deadLinks,
-                        strikethrough = item.done,
-                        dimmed = item.done,
+                        strikethrough = item.isTask && item.done,
+                        dimmed = item.isTask && item.done,
                     )
                     item.children.forEach { child ->
                         ReaderBlockRenderer(
@@ -231,6 +263,8 @@ private fun ReaderTaskList(
                             currentNotePath = currentNotePath,
                             deadLinks = deadLinks,
                             onOpenImage = onOpenImage,
+                            onTaskToggle = onTaskToggle,
+                            taskEditingEnabled = taskEditingEnabled,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -248,6 +282,8 @@ private fun ReaderQuote(
     currentNotePath: String,
     deadLinks: Set<String>,
     onOpenImage: (String) -> Unit,
+    onTaskToggle: ((MdBlock.TaskList.TaskItem) -> Unit)?,
+    taskEditingEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -268,7 +304,8 @@ private fun ReaderQuote(
                 .padding(start = 14.dp, top = 4.dp, bottom = 4.dp),
         ) {
             block.children.forEach { child ->
-                ReaderBlockRenderer(child, links, currentNotePath, deadLinks = deadLinks, onOpenImage = onOpenImage)
+                ReaderBlockRenderer(child, links, currentNotePath, deadLinks = deadLinks, onOpenImage = onOpenImage,
+                    onTaskToggle = onTaskToggle, taskEditingEnabled = taskEditingEnabled)
             }
         }
     }
@@ -293,6 +330,8 @@ private fun ReaderCallout(
     currentNotePath: String,
     deadLinks: Set<String>,
     onOpenImage: (String) -> Unit,
+    onTaskToggle: ((MdBlock.TaskList.TaskItem) -> Unit)?,
+    taskEditingEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val skin = calloutSkin(block.kind)
@@ -315,7 +354,7 @@ private fun ReaderCallout(
             )
             Text(
                 (block.title ?: block.type.uppercase()),
-                style = AppTypography.caption.copy(fontWeight = FontWeight.SemiBold),
+                style = readerTextStyle(AppTypography.caption.copy(fontWeight = FontWeight.SemiBold)),
                 color = skin.accent,
             )
         }
@@ -329,6 +368,8 @@ private fun ReaderCallout(
                         currentNotePath = currentNotePath,
                         deadLinks = deadLinks,
                         onOpenImage = onOpenImage,
+                        onTaskToggle = onTaskToggle,
+                        taskEditingEnabled = taskEditingEnabled,
                         modifier = Modifier,
                     )
                 }
@@ -358,14 +399,14 @@ private fun ReaderCodeBlock(block: MdBlock.CodeBlock, modifier: Modifier) {
         Column(Modifier.padding(16.dp)) {
             Text(
                 text = block.code,
-                style = AppTypography.codeBlock,
+                style = readerTextStyle(AppTypography.codeBlock),
                 color = AppColors.codeBlockText,
             )
         }
         if (block.language != null) {
             Text(
                 text = block.language,
-                style = AppTypography.badgeText,
+                style = readerTextStyle(AppTypography.badgeText),
                 color = AppColors.codeLangLabel,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -378,7 +419,8 @@ private fun ReaderCodeBlock(block: MdBlock.CodeBlock, modifier: Modifier) {
 /** 表格（原型 .tbl：横向滚动、表头暖白底、min-width 440dp 触发横滚；单元格支持内联样式） */
 @Composable
 private fun ReaderTable(block: MdBlock.Table, links: ReaderLinkHandler, deadLinks: Set<String>, modifier: Modifier = Modifier) {
-    val columnWidths = remember(block) { estimateColumnWidths(block) }
+    val fontScale = LocalReadingAppearance.current.fontScale
+    val columnWidths = remember(block, fontScale) { estimateColumnWidths(block).map { it * fontScale } }
 
     Box(
         modifier = modifier
@@ -483,8 +525,10 @@ fun InlineText(
     dimmed: Boolean = false,
 ) {
     val baseColor = if (dimmed) AppColors.textMeta else AppColors.textPrimary
+    val appearance = LocalReadingAppearance.current
     val tapRanges = remember(inlines) { mutableListOf<TapRange>() }
-    val annotated = remember(inlines, strikethrough, dimmed, deadLinks) {
+    val annotated = remember(inlines, strikethrough, dimmed, deadLinks, appearance) {
+        tapRanges.clear()
         buildAnnotatedString {
             fun emit(list: List<MdInline>, carrier: SpanCarrier) {
                 list.forEach { inline ->
@@ -508,7 +552,7 @@ fun InlineText(
                             addStyle(
                                 SpanStyle(
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.5.sp,
+                                    fontSize = 13.5.sp * appearance.fontScale,
                                     background = AppColors.surfaceWarm,
                                     color = carrier.color ?: baseColor,
                                 ),
@@ -543,7 +587,7 @@ fun InlineText(
                             addStyle(
                                 SpanStyle(
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 13.5.sp,
+                                    fontSize = 13.5.sp * appearance.fontScale,
                                     color = AppColors.textMeta,
                                     background = AppColors.surfaceWarm,
                                 ),
@@ -562,7 +606,7 @@ fun InlineText(
     val layoutResult = remember { mutableStateOf<TextLayoutResult?>(null) }
     Text(
         text = annotated,
-        style = style,
+        style = readerTextStyle(style),
         modifier = modifier.pointerInput(inlines) {
             detectTapGestures { offset ->
                 val layout = layoutResult.value ?: return@detectTapGestures

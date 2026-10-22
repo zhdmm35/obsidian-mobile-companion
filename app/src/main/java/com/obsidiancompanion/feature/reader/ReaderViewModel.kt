@@ -15,6 +15,9 @@ import com.obsidiancompanion.model.markdown.MdInline
 import com.obsidiancompanion.util.Format
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import com.obsidiancompanion.data.settings.ReadingAppearance
 
 /** Reader 状态（§49）：Loading / Content / OfflineCached(含于 Content) / OfflineNotCached / Error。 */
 sealed interface ReaderUiState {
@@ -63,6 +66,19 @@ class ReaderViewModel : ViewModel() {
     private var observingPath: String? = null
     private var favoriteJob: kotlinx.coroutines.Job? = null
     private var positionSaveJob: kotlinx.coroutines.Job? = null
+
+    fun setReadingAppearance(value: ReadingAppearance, onMessage: (String) -> Unit) {
+        // DataStore 按请求顺序串行写入；立即排队，避免离开页面取消最后一次选择。
+        AppGraph.appScope.launch(Dispatchers.Main.immediate) {
+            try {
+                AppGraph.settings.setReadingAppearance(value)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                onMessage("阅读设置未能保存，请重试")
+            }
+        }
+    }
 
     fun saveReadingPosition(content: ReaderUiState.Content, itemIndex: Int, scrollOffset: Int) {
         positionSaveJob?.cancel()

@@ -21,7 +21,7 @@ object Routes {
 
     // ── Push 栈（无底栏）──────────────────────────────────────
     const val READER = "reader/{noteId}?anchor={anchor}"
-    const val EDITOR = "editor/{noteId}?restoreDraft={restoreDraft}"
+    const val EDITOR = "editor/{noteId}?restoreDraft={restoreDraft}&tasks={tasks}"
 
     /** 图片查看器（path = URL 编码的仓库相对路径，与 Reader 同一约定）。 */
     const val VIEWER = "viewer/{path}"
@@ -40,8 +40,8 @@ object Routes {
     fun reader(noteId: String, anchor: String? = null): String =
         if (anchor == null) "reader/$noteId" else "reader/$noteId?anchor=$anchor"
 
-    fun editor(noteId: String, restoreDraft: Boolean = false): String =
-        "editor/$noteId?restoreDraft=$restoreDraft"
+    fun editor(noteId: String, restoreDraft: Boolean = false, tasks: Boolean = false): String =
+        "editor/$noteId?restoreDraft=$restoreDraft&tasks=$tasks"
 
     fun capture(draftId: String): String = "capture?draftId=$draftId"
 

@@ -13,6 +13,8 @@ import com.obsidiancompanion.data.repository.EditorNoteStore
 import com.obsidiancompanion.data.repository.NoteOpenResult
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.model.DomainError
+import com.obsidiancompanion.model.markdown.MdBlock
+import com.obsidiancompanion.model.markdown.MdFrontmatter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +59,13 @@ class EditorViewModel(
         updateHistoryState()
     }
 
+    fun toggleTask(snapshot: String, frontmatter: MdFrontmatter?, task: MdBlock.TaskList.TaskItem): Boolean {
+        if (!loaded || leaving || saveState == SaveState.SAVING || pendingDraft != null || value.text != snapshot) return false
+        val updated = toggleMarkdownTask(snapshot, frontmatter, task) ?: return false
+        onValueChange(value.copy(text = updated, composition = null))
+        return true
+    }
+
     fun undo() { if (loaded && saveState != SaveState.SAVING) { value = history.undo(); draftStaged = false; updateHistoryState() } }
     fun redo() { if (loaded && saveState != SaveState.SAVING) { value = history.redo(); draftStaged = false; updateHistoryState() } }
     private fun updateHistoryState() { canUndo = history.canUndo; canRedo = history.canRedo }
@@ -97,12 +106,13 @@ class EditorViewModel(
     var loaded by mutableStateOf(false)
         private set
 
-    /** 预览模式：只读渲染当前文本（复用 Reader 渲染管线），不与输入框同时显示。 */
+    /** 预览模式：渲染当前文本并允许勾选任务，不与输入框同时显示。 */
     var preview by mutableStateOf(false)
 
-    fun load(path: String, restoreDraftOnLoad: Boolean = false) {
+    fun load(path: String, restoreDraftOnLoad: Boolean = false, taskMode: Boolean = false) {
         if (loadedPath == path) return
         loadedPath = path
+        preview = taskMode
         fetch(path, restoreDraftOnLoad)
     }
 

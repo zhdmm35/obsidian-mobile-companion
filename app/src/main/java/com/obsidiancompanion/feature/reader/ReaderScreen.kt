@@ -16,6 +16,8 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.snapshotFlow
@@ -49,9 +51,11 @@ import com.obsidiancompanion.core.ui.ConfirmationDialog
 import com.obsidiancompanion.core.ui.EmptyState
 import com.obsidiancompanion.core.ui.SecondaryButton
 import com.obsidiancompanion.data.repository.LinkResolution
+import com.obsidiancompanion.data.settings.AppSettings
 import com.obsidiancompanion.model.markdown.MdBlock
 import com.obsidiancompanion.model.markdown.MdInline
 import com.obsidiancompanion.model.markdown.findHeadingIndex
+import com.obsidiancompanion.model.markdown.hasTasks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
@@ -79,8 +83,10 @@ fun ReaderScreen(
     onShare: (title: String, markdown: String) -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: ReaderViewModel = viewModel(),
+    onEditTasks: () -> Unit = onEdit,
 ) {
     LaunchedEffect(notePath) { viewModel.load(notePath) }
+    val settings by AppGraph.settings.flow.collectAsState(initial = AppSettings())
 
     when (val state = viewModel.state) {
         is ReaderUiState.Loading -> Column(
@@ -131,18 +137,21 @@ fun ReaderScreen(
         }
 
         is ReaderUiState.Content -> key(state.repoId, state.path, state.blobSha) {
-            ReaderContent(
-                state = state,
-                anchor = anchor,
-                onBack = onBack,
-                onEdit = onEdit,
-                onOpenNote = onOpenNote,
-                onOpenImage = onOpenImage,
-                onOpenExternalUrl = onOpenExternalUrl,
-                onShare = onShare,
-                onShowSnackbar = onShowSnackbar,
-                viewModel = viewModel,
-            )
+            CompositionLocalProvider(LocalReadingAppearance provides settings.readingAppearance) {
+                ReaderContent(
+                    state = state,
+                    anchor = anchor,
+                    onBack = onBack,
+                    onEdit = onEdit,
+                    onEditTasks = onEditTasks,
+                    onOpenNote = onOpenNote,
+                    onOpenImage = onOpenImage,
+                    onOpenExternalUrl = onOpenExternalUrl,
+                    onShare = onShare,
+                    onShowSnackbar = onShowSnackbar,
+                    viewModel = viewModel,
+                )
+            }
         }
     }
 }
@@ -174,6 +183,7 @@ private fun ReaderContent(
     anchor: String?,
     onBack: () -> Unit,
     onEdit: () -> Unit,
+    onEditTasks: () -> Unit,
     onOpenNote: (path: String, heading: String?) -> Unit,
     onOpenImage: (String) -> Unit,
     onOpenExternalUrl: (String) -> Unit,
@@ -183,6 +193,8 @@ private fun ReaderContent(
 ) {
     val clipboard = LocalClipboardManager.current
     var moreSheetVisible by remember { mutableStateOf(false) }
+    var appearanceVisible by remember { mutableStateOf(false) }
+    val appearance = LocalReadingAppearance.current
     var fileInfoVisible by remember { mutableStateOf(false) }
     var readOnlyNoticeVisible by remember { mutableStateOf(false) }
     var outlineVisible by remember(state.path) { mutableStateOf(false) }
@@ -339,7 +351,7 @@ private fun ReaderContent(
                         ),
                 ) {
                     if (!compactHeader) {
-                        Text(state.title, style = AppTypography.readerTitle)
+                        Text(state.title, style = readerTextStyle(AppTypography.readerTitle))
                         Spacer(Modifier.height(12.dp))
                     }
                     Row(
@@ -447,6 +459,22 @@ private fun ReaderContent(
                 onShowSnackbar("正在刷新 ${state.title}")
                 viewModel.refreshNote(onShowSnackbar)
             },
+            onReadingSettings = {
+                moreSheetVisible = false
+                appearanceVisible = true
+            },
+            onEditTasks = if (state.document.hasTasks()) ({
+                moreSheetVisible = false
+                if (canWrite == false) readOnlyNoticeVisible = true else onEditTasks()
+            }) else null,
+        )
+    }
+
+    if (appearanceVisible) {
+        ReaderAppearanceSheet(
+            appearance = appearance,
+            onChange = { viewModel.setReadingAppearance(it, onShowSnackbar) },
+            onDismiss = { appearanceVisible = false },
         )
     }
 

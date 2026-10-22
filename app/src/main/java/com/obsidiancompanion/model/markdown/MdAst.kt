@@ -41,6 +41,11 @@ sealed interface MdBlock {
             val done: Boolean,
             val inlines: List<MdInline>,
             val children: List<MdBlock> = emptyList(),
+            val isTask: Boolean = true,
+            /** 正文中的零基行、列；来自解析器，不从展示文本猜测。 */
+            val sourceLine: Int? = null,
+            val sourceColumn: Int? = null,
+            val listMarker: String = "•",
         )
     }
 
@@ -81,6 +86,18 @@ sealed interface MdBlock {
     data class EmbeddedFile(val target: String, val label: String?) : MdBlock
 
     data object HorizontalRule : MdBlock
+}
+
+fun MdDocument.hasTasks(): Boolean {
+    fun contains(block: MdBlock): Boolean = when (block) {
+        is MdBlock.TaskList -> block.items.any { it.isTask || it.children.any(::contains) }
+        is MdBlock.BulletList -> block.items.any { it.children.any(::contains) }
+        is MdBlock.OrderedList -> block.items.any { it.children.any(::contains) }
+        is MdBlock.Quote -> block.children.any(::contains)
+        is MdBlock.Callout -> block.blocks.any(::contains)
+        else -> false
+    }
+    return blocks.any(::contains)
 }
 
 sealed interface MdInline {

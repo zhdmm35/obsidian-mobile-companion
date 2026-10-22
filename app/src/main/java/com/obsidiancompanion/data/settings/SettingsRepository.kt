@@ -3,6 +3,7 @@ package com.obsidiancompanion.data.settings
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +22,7 @@ data class AppSettings(
     val captureFolder: String = "",
     val dailyNoteFolder: String = "",
     val dailyNoteTemplate: String = "daily",
+    val readingAppearance: ReadingAppearance = ReadingAppearance(),
 ) {
     val repoId: String? get() = if (owner != null && repo != null) "$owner/$repo" else null
 }
@@ -45,6 +47,7 @@ class SettingsRepository(private val context: Context) {
             captureFolder = repoId?.let { p[captureFolderKey(it)] } ?: "",
             dailyNoteFolder = repoId?.let { p[dailyFolderKey(it)] } ?: "",
             dailyNoteTemplate = repoId?.let { p[dailyTemplateKey(it)] } ?: "daily",
+            readingAppearance = ReadingAppearance(p[READER_FONT_SIZE] ?: 17, p[READER_LINE_SPACING] ?: 100).normalized(),
         )
     }
 
@@ -63,6 +66,14 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAutoRefresh(value: Boolean) {
         context.settingsDataStore.edit { it[AUTO_REFRESH] = value }
+    }
+
+    suspend fun setReadingAppearance(value: ReadingAppearance) {
+        val next = value.normalized()
+        context.settingsDataStore.edit {
+            it[READER_FONT_SIZE] = next.fontSize
+            it[READER_LINE_SPACING] = next.lineSpacing
+        }
     }
 
     suspend fun setCaptureFolder(repoId: String, folder: String) {
@@ -97,5 +108,7 @@ class SettingsRepository(private val context: Context) {
         val ONBOARDED = booleanPreferencesKey("is_onboarded")
         val AUTO_REFRESH = booleanPreferencesKey("auto_refresh")
         val CAN_WRITE = booleanPreferencesKey("can_write")
+        val READER_FONT_SIZE = intPreferencesKey("reader_font_size")
+        val READER_LINE_SPACING = intPreferencesKey("reader_line_spacing")
     }
 }

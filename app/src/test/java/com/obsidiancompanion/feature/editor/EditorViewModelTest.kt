@@ -9,6 +9,8 @@ import com.obsidiancompanion.data.repository.EditorNoteStore
 import com.obsidiancompanion.data.repository.NoteOpenResult
 import com.obsidiancompanion.data.repository.NoteSaveResult
 import com.obsidiancompanion.model.markdown.MdDocument
+import com.obsidiancompanion.model.markdown.MdBlock
+import com.obsidiancompanion.data.markdown.MarkdownParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +41,62 @@ class EditorViewModelTest {
 
     private fun editor(online: Boolean = true): EditorViewModel =
         EditorViewModel(notes, { online }, { refreshed++ }).also { store.put("editor", it); it.load("A.md") }
+
+    @Test fun taskTogglesUseHistoryLocalDraftAndVersionCheckedSave() = runTest {
+        val editor = editor()
+        runCurrent()
+        val source = "---\r\ntitle: test\r\n---\r\n- [ ] task\r\n"
+        editor.onValueChange(TextFieldValue(source))
+        val doc = MarkdownParser.parse(source)
+        val task = (doc.blocks.single() as MdBlock.TaskList).items.single()
+        assertTrue(editor.toggleTask(source, doc.frontmatter, task))
+        val updated = source.replace("[ ]", "[x]")
+        assertEquals(updated, editor.value.text)
+        editor.undo()
+        assertEquals(source, editor.value.text)
+        editor.redo()
+        assertEquals(updated, editor.value.text)
+        editor.onBackground()
+        runCurrent()
+        assertEquals(updated, notes.pending!!.content)
+        editor.save({}, {}, {})
+        runCurrent()
+        assertEquals("indexed", notes.savedBase)
+        assertEquals(updated, notes.savedText)
+    }
+
+    @Test fun staleTaskPreviewCannotChangeCurrentTextOrToggleTwice() = runTest {
+        val editor = editor()
+        runCurrent()
+        val source = "- [ ] task"
+        editor.onValueChange(TextFieldValue(source))
+        val task = (MarkdownParser.parse(source).blocks.single() as MdBlock.TaskList).items.single()
+        assertTrue(editor.toggleTask(source, null, task))
+        assertFalse(editor.toggleTask(source, null, task))
+        editor.onValueChange(TextFieldValue("- [ ] other"))
+        assertFalse(editor.toggleTask(source, null, task))
+        assertEquals("- [ ] other", editor.value.text)
+    }
+
+    @Test fun taskModeIsInitialOnlyAndSavingBlocksToggles() = runTest {
+        val editor = EditorViewModel(notes, { true }, {})
+        store.put("editor", editor)
+        editor.load("A.md", taskMode = true)
+        runCurrent()
+        assertTrue(editor.preview)
+        editor.preview = false
+        editor.load("A.md", taskMode = true)
+        assertFalse(editor.preview)
+        val source = "- [ ] task"
+        editor.onValueChange(TextFieldValue(source))
+        val task = (MarkdownParser.parse(source).blocks.single() as MdBlock.TaskList).items.single()
+        notes.gate = CompletableDeferred()
+        editor.save({}, {}, {})
+        runCurrent()
+        assertFalse(editor.toggleTask(source, null, task))
+        notes.gate!!.complete(Unit)
+        runCurrent()
+    }
 
     @Test fun backgroundImmediatelyStagesTextWithoutWaitingForDebounce() = runTest {
         val editor = editor()

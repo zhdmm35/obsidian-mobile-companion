@@ -27,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,9 +61,13 @@ import com.obsidiancompanion.core.ui.GhostButton
 import com.obsidiancompanion.core.ui.PrimaryButton
 import com.obsidiancompanion.core.ui.SecondaryButton
 import com.obsidiancompanion.data.markdown.MarkdownParser
+import com.obsidiancompanion.data.settings.AppSettings
+import com.obsidiancompanion.feature.reader.LocalReadingAppearance
 import com.obsidiancompanion.feature.reader.ReaderBlockRenderer
 import com.obsidiancompanion.feature.reader.ReaderLinkHandler
 import com.obsidiancompanion.model.markdown.MdDocument
+import com.obsidiancompanion.model.markdown.MdBlock
+import com.obsidiancompanion.model.markdown.MdFrontmatter
 import com.obsidiancompanion.model.markdown.MdInline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -76,8 +82,9 @@ fun EditorScreen(
     onOpenToken: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     viewModel: EditorViewModel = viewModel(factory = AppGraph.editorViewModelFactory),
+    taskMode: Boolean = false,
 ) {
-    LaunchedEffect(notePath) { viewModel.load(notePath, restoreDraftOnLoad) }
+    LaunchedEffect(notePath) { viewModel.load(notePath, restoreDraftOnLoad, taskMode) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -243,7 +250,15 @@ fun EditorScreen(
         AppHorizontalDivider()
 
         if (viewModel.preview && viewModel.loaded) {
-            EditorPreview(viewModel.value.text, notePath, Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("可勾选任务，完成后点「保存」同步。", style = AppTypography.caption, color = AppColors.textTertiary,
+                    modifier = Modifier.padding(horizontal = AppSpacing.readerPaddingHorizontal, vertical = 8.dp))
+                EditorPreview(
+                    viewModel.value.text, notePath, Modifier.weight(1f),
+                    onTaskToggle = viewModel::toggleTask,
+                    taskEditingEnabled = !saving && viewModel.pendingDraft == null,
+                )
+            }
         } else Column(
             Modifier
                 .fillMaxSize()
@@ -330,16 +345,22 @@ private fun EditorToolIcon(
 }
 
 /**
- * 编辑预览：当前文本的一次性只读渲染（复用 Reader 渲染管线）。
- * 预览中文本不可变 → produceState 每次进入只解析一次；链接/图片点击在预览中惰性（不跳转）。
+ * 编辑预览：复用 Reader 渲染管线，任务操作回到既有编辑历史和草稿流程。
+ * 解析结果与原文快照绑定；解析追上当前文本前禁用任务操作。
  * 独立 LazyColumn 只组合可见块，避免长笔记一次渲染所有段落和图片。
  */
 @Composable
-private fun EditorPreview(markdown: String, notePath: String, modifier: Modifier) {
+private fun EditorPreview(
+    markdown: String,
+    notePath: String,
+    modifier: Modifier,
+    onTaskToggle: (String, MdFrontmatter?, MdBlock.TaskList.TaskItem) -> Boolean,
+    taskEditingEnabled: Boolean,
+) {
     // Compose 1.7.6 lint 未识别下方 value 赋值，仅豁免此调用。
     @Suppress("ProduceStateDoesNotAssignValue")
-    val document by produceState<MdDocument?>(null, markdown) {
-        value = withContext(Dispatchers.Default) { MarkdownParser.parse(markdown) }
+    val parsed by produceState<Pair<String, MdDocument>?>(null, markdown) {
+        value = withContext(Dispatchers.Default) { markdown to MarkdownParser.parse(markdown) }
     }
     val links = remember {
         object : ReaderLinkHandler {
@@ -347,23 +368,32 @@ private fun EditorPreview(markdown: String, notePath: String, modifier: Modifier
             override fun onWikiLink(wiki: MdInline.WikiLink) = Unit
         }
     }
-    val doc = document
-    if (doc == null) {
+    val preview = parsed
+    if (preview == null) {
         Text("正在生成预览…", style = AppTypography.bodySmall, color = AppColors.textTertiary)
         return
     }
-    LazyColumn(
-        modifier = modifier.fillMaxWidth().background(AppColors.surface),
-        contentPadding = PaddingValues(horizontal = AppSpacing.readerPaddingHorizontal, vertical = 16.dp),
-    ) {
-        itemsIndexed(doc.blocks) { _, block ->
-            ReaderBlockRenderer(
-                block = block,
-                links = links,
-                currentNotePath = notePath,
-                deadLinks = emptySet(),
-                onOpenImage = {},
-            )
+    val (snapshot, doc) = preview
+    val settings by AppGraph.settings.flow.collectAsState(initial = AppSettings())
+    CompositionLocalProvider(LocalReadingAppearance provides settings.readingAppearance) {
+        LazyColumn(
+            modifier = modifier.fillMaxWidth().background(AppColors.surface),
+            contentPadding = PaddingValues(horizontal = AppSpacing.readerPaddingHorizontal, vertical = 16.dp),
+        ) {
+            itemsIndexed(doc.blocks) { _, block ->
+                ReaderBlockRenderer(
+                    block = block,
+                    links = links,
+                    currentNotePath = notePath,
+                    deadLinks = emptySet(),
+                    onOpenImage = {},
+                    onTaskToggle = { task ->
+                        onTaskToggle(snapshot, doc.frontmatter, task)
+                        Unit
+                    },
+                    taskEditingEnabled = taskEditingEnabled && snapshot == markdown,
+                )
+            }
         }
     }
 }

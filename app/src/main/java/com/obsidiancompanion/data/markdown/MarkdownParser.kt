@@ -38,6 +38,7 @@ import org.commonmark.node.StrongEmphasis
 import org.commonmark.node.Text
 import org.commonmark.node.ThematicBreak
 import org.commonmark.parser.Parser
+import org.commonmark.parser.IncludeSourceSpans
 
 /** Obsidian 嵌入目标的扩展名分类（§34：extension 决定 Image / Note / Unknown；Tree kind 在解析期校正）。 */
 internal val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "avif")
@@ -51,6 +52,7 @@ internal val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif", "svg"
 object MarkdownParser {
 
     private val parser: Parser = Parser.builder()
+        .includeSourceSpans(IncludeSourceSpans.BLOCKS)
         .extensions(
             listOf(
                 TablesExtension.create(),
@@ -63,7 +65,28 @@ object MarkdownParser {
     fun parse(source: String): MdDocument {
         val (frontmatter, body) = stripFrontmatter(source)
         val document = parser.parse(ObsidianSyntax.preprocess(body))
+        restoreLiteralTaskMarkers(document, body)
         return MdDocument(frontmatter, convertBlocks(document))
+    }
+
+    /** 扩展在转义还原后识别任务；原文不是勾选标记时恢复为普通文本。 */
+    private fun restoreLiteralTaskMarkers(node: Node, source: String) {
+        if (node is ListItem) {
+            val marker = node.firstChild as? TaskListItemMarker
+            val paragraph = marker?.next as? Paragraph
+            val offset = paragraph?.sourceSpans?.firstOrNull()?.inputIndex
+            if (marker != null && paragraph != null && offset != null &&
+                source.substring(offset, (offset + 3).coerceAtMost(source.length)) !in setOf("[ ]", "[x]", "[X]")) {
+                val literal = Text(if (marker.isChecked) "[x] " else "[ ] ")
+                paragraph.prependChild(literal)
+                marker.unlink()
+            }
+        }
+        var child = node.firstChild
+        while (child != null) {
+            restoreLiteralTaskMarkers(child, source)
+            child = child.next
+        }
     }
 
     /* ── Frontmatter 预处理（§48：极窄实现，只剥离 + 保留原文）────── */
@@ -244,11 +267,19 @@ object MarkdownParser {
         val hasTask = items.any { taskMarker(it) != null }
         return if (hasTask) {
             MdBlock.TaskList(
-                items.map { item ->
+                items.mapIndexed { index, item ->
+                    val marker = taskMarker(item)
+                    var paragraph = item.firstChild
+                    while (paragraph != null && paragraph !is Paragraph) paragraph = paragraph.next
+                    val span = paragraph?.sourceSpans?.firstOrNull()
                     MdBlock.TaskList.TaskItem(
-                        done = taskMarker(item)?.isChecked == true,
+                        done = marker?.isChecked == true,
                         inlines = firstParagraphInlines(item),
                         children = itemChildBlocks(item),
+                        isTask = marker != null,
+                        sourceLine = if (marker != null) span?.lineIndex else null,
+                        sourceColumn = if (marker != null) span?.columnIndex else null,
+                        listMarker = if (ordered) "${(list as OrderedList).startNumber + index}." else "•",
                     )
                 },
             )
