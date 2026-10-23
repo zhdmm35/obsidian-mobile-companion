@@ -69,10 +69,11 @@ class DailyNoteExperienceTest {
     @Test fun homeDailyEntryOpensExistingBodyAndRemembersTemplateWithoutReplacingIt() {
         scenario = ActivityScenario.launch(MainActivity::class.java)
         click("今日笔记")
-        waitForText("目标：$path")
+        waitForText("目标：$path", scrollToFind = true)
         click("会议记录")
         screenshot("experience-daily-note.png")
         click("打开或创建")
+        waitForText("更多") // Reader 正文已加载；等待导航时不能滚动目标页面。
         waitForText(original)
         runBlocking {
             assertEquals("meeting", AppGraph.settings.flow.first().dailyNoteTemplate)
@@ -128,24 +129,43 @@ class DailyNoteExperienceTest {
         return null
     }
 
-    private fun waitForText(text: String): AccessibilityNodeInfo {
+    private fun waitForText(text: String, scrollToFind: Boolean = false): AccessibilityNodeInfo {
         val deadline = SystemClock.uptimeMillis() + 10_000
         while (SystemClock.uptimeMillis() < deadline) {
-            findNode(instrumentation.uiAutomation.rootInActiveWindow) {
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            val exact = findNode(root) { it.text?.toString() == text || it.contentDescription?.toString() == text }
+            (exact ?: findNode(root) {
                 it.text?.toString()?.contains(text) == true || it.contentDescription?.toString()?.contains(text) == true
-            }?.let { return it }
-            findNode(instrumentation.uiAutomation.rootInActiveWindow) { it.isScrollable }
-                ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            })?.let { return it }
+            if (scrollToFind) {
+                findNode(root) { it.isScrollable }
+                    ?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            }
             SystemClock.sleep(100)
         }
         screenshot("experience-daily-failure.png")
-        error("UI text not found: $text")
+        val visible = mutableListOf<String>()
+        findNode(instrumentation.uiAutomation.rootInActiveWindow) {
+            if (!it.isPassword && !it.isEditable && it.isVisibleToUser) {
+                (it.text ?: it.contentDescription)?.toString()?.let(visible::add)
+            }
+            false
+        }
+        error("UI text not found: $text; visible UI: ${visible.joinToString(" | ")}")
     }
 
     private fun click(text: String) {
-        var node: AccessibilityNodeInfo? = waitForText(text)
-        while (node != null && !node.isClickable) node = node.parent
-        check(node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { "UI text is not clickable: $text" }
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            var node: AccessibilityNodeInfo? = waitForText(text, scrollToFind = true)
+            while (node != null && !node.isClickable) node = node.parent
+            if (node?.isEnabled == true && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                instrumentation.waitForIdleSync()
+                return
+            }
+            SystemClock.sleep(100)
+        }
+        error("UI text is not clickable: $text")
     }
 
     private fun screenshot(name: String) {
